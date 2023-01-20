@@ -9,3 +9,7 @@
 Makefile.coq
 Makefile.coq.conf
 .Makefile.coq.d
+
+# Rust
+target/
+/cti/Cargo.lock

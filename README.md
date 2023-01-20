@@ -1,7 +1,7 @@
 # Programming Language Papers
 
 Implementations of various PL papers for [CS 630 Programming Language System
-Models](https://faculty.cs.byu.edu/~kimball/630/) in Coq.
+Models](https://faculty.cs.byu.edu/~kimball/630/) in Coq and Rust.
 
 - [aam](aam): Abstracting Abstract Machines (Van Horn and Might 2010)
   [[ACM](https://dl.acm.org/doi/10.1145/1863543.1863553),
