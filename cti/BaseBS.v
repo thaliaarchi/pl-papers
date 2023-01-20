@@ -3,8 +3,8 @@ Require Import String.
 (*
   Syntax
 
-  exp corresponds to exp from small-step, without internal-only forms (Code,
-  Reflect, Lam_c, Let_c). Instead of explicit names, we use de Bruijn levels
+  exp corresponds to exp from small-step, without internal-only forms ([Code],
+  [Reflect], [LamC], [LetC]). Instead of explicit names, we use de Bruijn levels
   [Var n], hence [Lam e] instead of [Lam f x e].
 *)
 Inductive exp : Type :=
