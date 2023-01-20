@@ -9,3 +9,5 @@ Models](https://faculty.cs.byu.edu/~kimball/630/) in Coq.
 - [fnd](fnd): Fixing Non-determinism (Vandenbroucke, Schrijvers, and Piessens
   2015) [[ACM](https://dl.acm.org/doi/10.1145/2897336.2897342),
   [alternate](https://lirias.kuleuven.be/retrieve/383155/)]
+- [cti](cti): Collapsing Towers of Interpreters (Amin and Rompf 2018)
+  [[ACM](https://dl.acm.org/doi/10.1145/3158140)]
