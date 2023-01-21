@@ -1,24 +1,20 @@
-Require Import String Arith.
+Require Import Arith List.
+Import ListNotations.
 
 (* λ⇅ small-step semantics *)
 
 (* Syntax *)
-
-Inductive UNKNOWN : Type.
-
 Inductive exp : Type :=
-  | X (x : UNKNOWN)
   | Lit (n : nat)
-  | Str (s : string)
-  | Lam (f : UNKNOWN) (x : UNKNOWN) (e : exp)
+  | Var (x : nat)
+  | Lam (e : exp) (* Implicit f (self) and x (param ident) *)
   | App (e1 e2 : exp)
   | Cons (e1 e2 : exp)
-  | Let (x : UNKNOWN) (e1 e2 : exp)
+  | Let (e1 e2 : exp) (* Implicit x (ident) *)
   | If (e1 e2 e3 : exp)
 
   (* ⊕¹ - Unary operators *)
   | IsNum (e : exp)
-  | IsStr (e : exp)
   | IsCons (e : exp)
   | Car (e : exp)
   | Cdr (e : exp)
@@ -35,88 +31,69 @@ Inductive exp : Type :=
   (* g - Internal small-step forms *)
   | Code (e : exp)
   | Reflect (e : exp)
-  | LamC (f : UNKNOWN) (x : UNKNOWN) (e : exp)
-  | LetC (x : UNKNOWN) (e1 e2 : exp).
-
-Definition is_g (e : exp) : bool :=
-  match e with
-  | Code _ | Reflect _ | LamC _ _ _ | LetC _ _ _ => true
-  | _ => false
-  end.
+  | LamC (e : exp) (* Implicit f (self) and x (param ident) *)
+  | LetC (e1 e2 : exp). (* Implicit x (ident) *)
 
 Definition is_v (e : exp) : bool :=
   match e with
-  | Lit _ | Str _ | Lam _ _ _ | Cons _ _ | Code _ => true
+  | Lit _ | Lam _ | Cons _ _ | Code _ => true
   | _ => false
   end.
+
+(* Environment *)
+Definition env : Type := list exp.
+
+Definition lookup (ρ : env) (n : nat) : option exp :=
+  nth_error (rev ρ) n.
 
 Definition lit_of_bool (b : bool) : exp :=
   Lit (if b then 1 else 0).
 
-(* Contexts *)
+Notation "'?'" := (Lit 42).
 
-Inductive M : Type :=
-  | Mnil (* [] *)
-  | MB (m : M) (* B(M) *)
-  | MR (m : M). (* R(M) *)
-
-Inductive E : Type :=
-  | Enil (* [] *)
-  | EB (e : E). (* B(E) *)
-
-(*
-Inductive P : Type :=
-  | Pnil (* [] *)
-  | PB (q : Q) (* B(Q) *)
-  | PR (p : P). (* R(P) *)
-
-Inductive Q : Type :=
-  | QB (q : Q) (* B(Q) *)
-  | QR (p : P). (* R(P) *)
-*)
+Reserved Notation "st '-->' st'" (at level 40).
 
 (* Reduction rules *)
-
-Notation "'?'" := (Str "unknown").
-
-Reserved Notation "e '-->' e'" (at level 40).
-
-Inductive step : exp -> exp -> Prop :=
-  | M_Let : forall x v e,               Let x v e                        --> ?
-  | M_App : forall f x e v,             App (Lam f x e) v                --> ?
-  | M_App_Code : forall e1 e2,          App (Code e1) (Code e2)          --> Reflect (App e1 e2)
-  | M_If_false : forall e1 e2,          If (Lit 0) e1 e2                 --> e2
-  | M_If_true : forall n e1 e2,         n <> 0 ->
-                                        If (Lit n) e1 e2                 --> e1
-  | M_If_Code : forall e0 e1 e2,        If (Code e0) (Code e1) (Code e2) --> Reflect (If e0 e1 e2)
-  | M_IsNum_true : forall n,            IsNum (Lit n)                    --> Lit 1
-  | M_IsNum_Code : forall e,            IsNum (Code e)                   --> Reflect (IsNum e)
-  | M_IsNum_false : forall v n e,       v <> Lit n -> v <> Code e ->
-                                        IsNum v                          --> Lit 0
-  | M_IsCons_true : forall e1 e2,       IsCons (Cons e1 e2)              --> Lit 1
-  | M_IsCons_Code : forall e,           IsCons (Code e)                  --> Reflect (IsCons e)
-  | M_IsCons_false : forall v e1 e2 e,  v <> Cons e1 e2 -> v <> Code e ->
-                                        IsCons v                         --> Lit 0
-  | M_Car_Cons : forall e1 e2,          Car (Cons e1 e2)                 --> e1
-  | M_Car_Code : forall e,              Car (Code e)                     --> Reflect (Car e)
-  | M_Cdr_Cons : forall e1 e2,          Cdr (Cons e1 e2)                 --> e2
-  | M_Cdr_Code : forall e,              Cdr (Code e)                     --> Reflect (Cdr e)
-  | M_Plus_Lit : forall n1 n2,          Plus (Lit n1) (Lit n2)           --> Lit (n1 + n2)
-  | M_Plus_Code : forall e1 e2,         Plus (Code e1) (Code e2)         --> Reflect (Plus e1 e2)
-  | M_Minus_Lit : forall n1 n2,         Minus (Lit n1) (Lit n2)          --> Lit (n1 - n2)
-  | M_Minus_Code : forall e1 e2,        Minus (Code e1) (Code e2)        --> Reflect (Minus e1 e2)
-  | M_Times_Lit : forall n1 n2,         Times (Lit n1) (Lit n2)          --> Lit (n1 * n2)
-  | M_Times_Code : forall e1 e2,        Times (Code e1) (Code e2)        --> Reflect (Times e1 e2)
-  | M_Eq_Lit : forall n1 n2,            Eq (Lit n1) (Lit n2)             --> lit_of_bool (n1 =? n2)
-  | M_Eq_Code : forall e1 e2,           Eq (Code e1) (Code e2)           --> Reflect (Eq e1 e2)
-  | M_Lift_Lit : forall n,              Lift (Lit n)                     --> Code (Lit n)
-  | M_Lift_Cons : forall e1 e2,         Lift (Cons (Code e1) (Code e2))  --> Reflect (Code (Cons e1 e2))
-  | M_Lift_Lam : forall f x e,          Lift (Lam f x e)                 --> Lift ?
-  | M_Lift_LamC : forall f x e,         Lift (LamC f x (Code e))         --> Reflect (Code (Lam f x e))
-  | M_Lift_Code : forall e,             Lift (Code e)                    --> Reflect (Code (Lift e))
-  | M_Run_Code : forall e1 e2,          Run (Code e1) (Code e2)          --> Reflect (Code (Run e1 e2))
-  | M_Run_else : forall v1 e1 e2,       v1 <> Code e1 ->
-                                        Run v1 (Code e1)                 --> e2
-  | (* ? *) PE_Reflect_Code : forall e, Reflect (Code e)                 --> ?
-  | M_LetC : forall x1 e1 e2,           LetC x1 e1 (Code e2)             --> Code (Let x1 e1 e2)
-  where "e '-->' e'" := (step e e').
+Inductive step : env * exp -> env * exp -> Prop :=
+  | S_Var : forall ρ x v,                lookup ρ x = Some v ->
+                                         (ρ, Var x)                            --> (ρ, v)
+  | S_Let : forall ρ v e,                is_v v = true ->
+                                         (ρ, Let v e)                          --> (v :: ρ, e)
+  | S_App : forall ρ e v,                is_v v = true ->
+                                         (ρ, App (Lam e) v)                    --> (v :: Lam e :: ρ, e)
+  | S_App_Code : forall ρ e1 e2,         (ρ, App (Code e1) (Code e2))          --> (ρ, Reflect (App e1 e2))
+  | S_If_false : forall ρ e1 e2,         (ρ, If (Lit 0) e1 e2)                 --> (ρ, e2)
+  | S_If_true : forall ρ n e1 e2,        n <> 0 ->
+                                         (ρ, If (Lit n) e1 e2)                 --> (ρ, e1)
+  | S_If_Code : forall ρ e0 e1 e2,       (ρ, If (Code e0) (Code e1) (Code e2)) --> (ρ, Reflect (If e0 e1 e2))
+  | S_IsNum_true : forall ρ n,           (ρ, IsNum (Lit n))                    --> (ρ, Lit 1)
+  | S_IsNum_Code : forall ρ e,           (ρ, IsNum (Code e))                   --> (ρ, Reflect (IsNum e))
+  | S_IsNum_false : forall ρ v n e,      v <> Lit n -> v <> Code e ->
+                                         (ρ, IsNum v)                          --> (ρ, Lit 0)
+  | S_IsCons_true : forall ρ e1 e2,      (ρ, IsCons (Cons e1 e2))              --> (ρ, Lit 1)
+  | S_IsCons_Code : forall ρ e,          (ρ, IsCons (Code e))                  --> (ρ, Reflect (IsCons e))
+  | S_IsCons_false : forall ρ v e1 e2 e, v <> Cons e1 e2 -> v <> Code e ->
+                                         (ρ, IsCons v)                         --> (ρ, Lit 0)
+  | S_Car_Cons : forall ρ e1 e2,         (ρ, Car (Cons e1 e2))                 --> (ρ, e1)
+  | S_Car_Code : forall ρ e,             (ρ, Car (Code e))                     --> (ρ, Reflect (Car e))
+  | S_Cdr_Cons : forall ρ e1 e2,         (ρ, Cdr (Cons e1 e2))                 --> (ρ, e2)
+  | S_Cdr_Code : forall ρ e,             (ρ, Cdr (Code e))                     --> (ρ, Reflect (Cdr e))
+  | S_Plus_Lit : forall ρ n1 n2,         (ρ, Plus (Lit n1) (Lit n2))           --> (ρ, Lit (n1 + n2))
+  | S_Plus_Code : forall ρ e1 e2,        (ρ, Plus (Code e1) (Code e2))         --> (ρ, Reflect (Plus e1 e2))
+  | S_Minus_Lit : forall ρ n1 n2,        (ρ, Minus (Lit n1) (Lit n2))          --> (ρ, Lit (n1 - n2))
+  | S_Minus_Code : forall ρ e1 e2,       (ρ, Minus (Code e1) (Code e2))        --> (ρ, Reflect (Minus e1 e2))
+  | S_Times_Lit : forall ρ n1 n2,        (ρ, Times (Lit n1) (Lit n2))          --> (ρ, Lit (n1 * n2))
+  | S_Times_Code : forall ρ e1 e2,       (ρ, Times (Code e1) (Code e2))        --> (ρ, Reflect (Times e1 e2))
+  | S_Eq_Lit : forall ρ n1 n2,           (ρ, Eq (Lit n1) (Lit n2))             --> (ρ, lit_of_bool (n1 =? n2))
+  | S_Eq_Code : forall ρ e1 e2,          (ρ, Eq (Code e1) (Code e2))           --> (ρ, Reflect (Eq e1 e2))
+  | S_Lift_Lit : forall ρ n,             (ρ, Lift (Lit n))                     --> (ρ, Code (Lit n))
+  | S_Lift_Cons : forall ρ e1 e2,        (ρ, Lift (Cons (Code e1) (Code e2)))  --> (ρ, Reflect (Code (Cons e1 e2)))
+  | S_Lift_Lam : forall ρ e,             (ρ, Lift (Lam e))                     --> (ρ, Lift (LamC ?))
+  | S_Lift_LamC : forall ρ e,            (ρ, Lift (LamC (Code e)))             --> (ρ, Reflect (Code (Lam e)))
+  | S_Lift_Code : forall ρ e,            (ρ, Lift (Code e))                    --> (ρ, Reflect (Code (Lift e)))
+  | S_Run_Code : forall ρ e1 e2,         (ρ, Run (Code e1) (Code e2))          --> (ρ, Reflect (Code (Run e1 e2)))
+  | S_Run_else : forall ρ v1 e1 e2,      v1 <> Code e1 ->
+                                         (ρ, Run v1 (Code e1))                 --> (ρ, e2)
+  | S_Reflect_Code : forall ρ e,         (ρ, Reflect (Code e))                 --> (ρ, ?)
+  | S_LetC : forall ρ e1 e2,             (ρ, LetC e1 (Code e2))                --> (ρ, Code (Let e1 e2))
+  where "st '-->' st'" := (step st st').
