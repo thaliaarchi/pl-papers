@@ -57,10 +57,10 @@ impl Interpreter {
                 (Code(u), Code(v)) => self.reflect(Cons(u, v)),
                 _ => panic!(),
             },
-            Clo(env2, e2) => {
+            Clo(mut env2, e2) => {
                 env2.push(Code(Box::new(self.fresh())));
                 env2.push(Code(Box::new(self.fresh())));
-                self.reflect(Lam(Box::new(self.reifyc(self.evalms(env2, *e2)))))
+                self.reflect(Lam(Box::new(self.reifyc(self.evalms(&env2, *e2)))))
             }
             Code(e) => self.reflect(Lift(e)),
         }
@@ -71,33 +71,35 @@ impl Interpreter {
     }
 
     // Multi-stage evaluation
-    pub fn evalms(&mut self, env: Env, e: Exp) -> Val {
+    pub fn evalms(&mut self, env: &Env, e: Exp) -> Val {
         match e {
             Lit(n) => Cst(n),
-            Var(n) => env[n as usize],
+            Var(n) => env[n as usize].clone(),
             Cons(e1, e2) => Tup(
                 Box::new(self.evalms(env, *e1)),
                 Box::new(self.evalms(env, *e2)),
             ),
-            Lam(e) => Clo(env, e),
+            Lam(e) => Clo(env.clone(), e),
             Let(e1, e2) => {
-                env.push(self.evalms(env, *e1));
-                self.evalms(env, *e2)
+                let mut env1 = env.clone();
+                env1.push(self.evalms(env, *e1));
+                self.evalms(&env1, *e2)
             }
             App(e1, e2) => match (self.evalms(env, *e1), self.evalms(env, *e2)) {
                 (Code(s1), Code(s2)) => self.reflectc(App(s1, s2)),
-                (Clo(env3, e3), v2) => {
-                    env3.push(Clo(env3, e3));
+                (Clo(env1, s1), v2) => {
+                    let mut env3 = env1.clone();
+                    env3.push(Clo(env1, s1.clone()));
                     env3.push(v2);
-                    self.evalms(env3, *e3)
+                    self.evalms(&env3, *s1)
                 }
                 _ => panic!(),
             },
             If(c, a, b) => match self.evalms(env, *c) {
                 Code(c1) => self.reflectc(If(
                     c1,
-                    Box::new(self.reifyc(self.evalms(env, *a))),
-                    Box::new(self.reifyc(self.evalms(env, *b))),
+                    Box::new(self.reifyc(self.evalms(&env, *a))),
+                    Box::new(self.reifyc(self.evalms(&env, *b))),
                 )),
                 Cst(n) => self.evalms(env, *if n != 0 { a } else { b }),
                 _ => panic!(),
@@ -143,7 +145,7 @@ impl Interpreter {
                 _ => panic!(),
             },
             Lift(e) => self.liftc(self.evalms(env, *e)),
-            Run(b, e) => match self.evalms(env.clone(), *b) {
+            Run(b, e) => match self.evalms(env, *b) {
                 Code(b1) => self.reflectc(Run(b1, Box::new(self.reifyc(self.evalms(env, *e))))),
                 _ => {
                     let fresh = self.fresh;
@@ -156,7 +158,7 @@ impl Interpreter {
         }
     }
 
-    fn evalmsg(&mut self, env: Env, e: Exp) -> Val {
+    fn evalmsg(&mut self, env: &Env, e: Exp) -> Val {
         self.reifyv(self.evalms(env, e))
     }
 
