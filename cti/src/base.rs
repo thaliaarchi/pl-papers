@@ -92,8 +92,7 @@ impl Interpreter {
                 let mut env2 = env2.clone();
                 env2.push(new_code(self.fresh()));
                 env2.push(new_code(self.fresh()));
-                let e = self.reifyc_evalms(&env2, *e2)?;
-                self.reflect(new_lam(e))
+                self.reflect(new_lam(self.reifyc_evalms(&env2, *e2)?))
             }
             Code(e) => self.reflect(new_lift(*e)),
         })
@@ -173,14 +172,8 @@ impl Interpreter {
             // First argument decides whether to generate `Run` statement or
             // run code directly.
             Run(c, e) => match *self.evalms(env, *c)? {
-                Code(b1) => {
-                    let e = self.reifyc_evalms(env, *e)?;
-                    self.reflectc(new_run(b1, e))
-                }
-                _ => {
-                    let e = self.reifyc_evalms_fresh(env, *e, env.len())?;
-                    self.evalmsg(env, e)?
-                }
+                Code(b1) => self.reflectc(new_run(b1, self.reifyc_evalms(env, *e)?)),
+                _ => self.evalmsg(env, self.reifyc_evalms_fresh(env, *e, env.len())?)?,
             },
         })
     }
@@ -203,11 +196,11 @@ impl Interpreter {
         new_code(self.reflect(e))
     }
 
-    fn reifyc_evalms(&mut self, env: &Env, e: ExpRef) -> Result<ExpRef> {
+    fn reifyc_evalms(&self, env: &Env, e: ExpRef) -> Result<ExpRef> {
         self.reifyc_evalms_fresh(env, e, self.fresh)
     }
 
-    fn reifyc_evalms_fresh(&mut self, env: &Env, e: ExpRef, fresh: usize) -> Result<ExpRef> {
+    fn reifyc_evalms_fresh(&self, env: &Env, e: ExpRef, fresh: usize) -> Result<ExpRef> {
         let v = Interpreter::with_fresh(fresh).evalms(env, e)?;
         Ok(self.fold_let(v.unwrap_code()?))
     }
