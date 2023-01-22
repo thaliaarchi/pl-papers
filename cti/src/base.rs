@@ -1,3 +1,5 @@
+use std::mem;
+
 use Exp::*;
 use Val::*;
 
@@ -60,7 +62,7 @@ impl Interpreter {
             Clo(mut env2, e2) => {
                 env2.push(Code(Box::new(self.fresh())));
                 env2.push(Code(Box::new(self.fresh())));
-                let e = Box::new(self.reifyc(|| self.evalms(&env2, *e2)));
+                let e = Box::new(self.reifyc_evalms(&env2, *e2));
                 self.reflect(Lam(e))
             }
             Code(e) => self.reflect(Lift(e)),
@@ -98,8 +100,8 @@ impl Interpreter {
             },
             If(c, a, b) => match self.evalms(env, *c) {
                 Code(c1) => {
-                    let a2 = Box::new(self.reifyc(|| self.evalms(&env, *a)));
-                    let b2 = Box::new(self.reifyc(|| self.evalms(&env, *b)));
+                    let a2 = Box::new(self.reifyc_evalms(&env, *a));
+                    let b2 = Box::new(self.reifyc_evalms(&env, *b));
                     self.reflectc(If(c1, a2, b2))
                 }
                 Cst(n) => self.evalms(env, *if n != 0 { a } else { b }),
@@ -145,17 +147,29 @@ impl Interpreter {
                 (Cst(n1), Cst(n2)) => Cst(if n1 == n2 { 1 } else { 0 }),
                 _ => panic!(),
             },
-            Lift(e) => self.liftc(self.evalms(env, *e)),
+            Lift(e) => {
+                let v = self.evalms(env, *e);
+                self.liftc(v)
+            }
             Run(b, e) => match self.evalms(env, *b) {
                 Code(b1) => {
-                    let e = Box::new(self.reifyc(|| self.evalms(env, *e)));
+                    let e = Box::new(self.reifyc_evalms(env, *e));
                     self.reflectc(Run(b1, e))
                 }
                 _ => {
-                    let e = self.reifyc(|| {
+                    let e = {
+                        let fresh = self.fresh;
                         self.fresh = env.len();
-                        self.evalms(env, *e)
-                    });
+                        let mut block = Vec::new();
+                        mem::swap(&mut block, &mut self.block);
+                        let e = match self.evalms(env, *e) {
+                            Code(e) => *e,
+                            _ => panic!(),
+                        };
+                        self.fresh = fresh;
+                        self.block = block;
+                        self.fold_let(e)
+                    };
                     self.evalmsg(env, e)
                 }
             },
@@ -163,7 +177,17 @@ impl Interpreter {
     }
 
     fn evalmsg(&mut self, env: &Env, e: Exp) -> Val {
-        self.reifyv(|| self.evalms(env, e))
+        let fresh = self.fresh;
+        let mut block = Vec::new();
+        mem::swap(&mut block, &mut self.block);
+        let res = self.evalms(env, e);
+        let v = match res {
+            Code(last) => Code(Box::new(self.fold_let(*last))),
+            _ => panic!(),
+        };
+        self.fresh = fresh;
+        self.block = block;
+        v
     }
 
     fn fresh(&mut self) -> Exp {
@@ -180,41 +204,16 @@ impl Interpreter {
         Code(Box::new(self.reflect(s)))
     }
 
-    fn run<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+    fn reifyc_evalms(&mut self, env: &Env, e: Exp) -> Exp {
         let fresh = self.fresh;
-        let block = self.block.clone();
-        let x = f();
+        let mut block = Vec::new();
+        mem::swap(&mut block, &mut self.block);
+        let v = self.evalms(env, e);
         self.fresh = fresh;
         self.block = block;
-        x
-    }
-
-    fn reify<F: FnOnce() -> Exp>(&mut self, f: F) -> Exp {
-        self.run(|| {
-            self.block.clear();
-            self.fold_let(f())
-        })
-    }
-
-    fn reifyc<F: FnOnce() -> Val>(&mut self, f: F) -> Exp {
-        self.reify(|| match f() {
+        self.fold_let(match v {
             Code(e) => *e,
             _ => panic!(),
-        })
-    }
-
-    fn reifyv<F: FnMut() -> Val>(&mut self, f: F) -> Val {
-        self.run(|| {
-            self.block = Vec::new();
-            let res = f();
-            if self.block.len() == 0 {
-                res
-            } else {
-                match res {
-                    Code(last) => Code(Box::new(self.fold_let(*last))),
-                    _ => panic!(),
-                }
-            }
         })
     }
 
