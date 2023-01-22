@@ -15,16 +15,26 @@ pub enum Exp {
     Cons(Box<Exp>, Box<Exp>),
     Let(Box<Exp>, Box<Exp>),
     If(Box<Exp>, Box<Exp>, Box<Exp>),
-    IsNum(Box<Exp>),
-    IsCons(Box<Exp>),
-    Car(Box<Exp>),
-    Cdr(Box<Exp>),
-    Plus(Box<Exp>, Box<Exp>),
-    Minus(Box<Exp>, Box<Exp>),
-    Times(Box<Exp>, Box<Exp>),
-    Eq(Box<Exp>, Box<Exp>),
+    Op1(Op1Kind, Box<Exp>),
+    Op2(Op2Kind, Box<Exp>, Box<Exp>),
     Lift(Box<Exp>),
     Run(Box<Exp>, Box<Exp>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op1Kind {
+    IsNum,
+    IsCons,
+    Car,
+    Cdr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op2Kind {
+    Plus,
+    Minus,
+    Times,
+    Eq,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,10 +73,9 @@ impl Interpreter {
     pub fn lift(&mut self, v: Val) -> Result<Exp> {
         match v {
             Cst(n) => Ok(Lit(n)),
-            Tup(a, b) => match (*a, *b) {
-                (Code(u), Code(v)) => Ok(self.reflect(Cons(u, v))),
-                _ => Err(Error::Type),
-            },
+            Tup(a, b) => {
+                Ok(self.reflect(Cons(Box::new(a.unwrap_code()?), Box::new(b.unwrap_code()?))))
+            }
             Clo(mut env2, e2) => {
                 env2.push(Code(Box::new(self.fresh())));
                 env2.push(Code(Box::new(self.fresh())));
@@ -121,45 +130,27 @@ impl Interpreter {
                 Cst(n) => self.evalms(env, *if n != 0 { a } else { b }),
                 _ => Err(Error::Type),
             },
-            IsNum(e) => match self.evalms(env, *e)? {
-                Code(s) => Ok(self.reflectc(IsNum(s))),
-                Cst(_) => Ok(Cst(1)),
-                _ => Ok(Cst(0)),
+            Op1(op, e) => match self.evalms(env, *e)? {
+                Code(s) => Ok(self.reflectc(Op1(op, s))),
+                v => match op {
+                    Op1Kind::IsNum => Ok(Val::from(matches!(v, Cst(_)))),
+                    Op1Kind::IsCons => Ok(Val::from(matches!(v, Tup(_, _)))),
+                    Op1Kind::Car => Ok(v.unwrap_tup()?.0),
+                    Op1Kind::Cdr => Ok(v.unwrap_tup()?.1),
+                },
             },
-            IsCons(e) => match self.evalms(env, *e)? {
-                Code(s) => Ok(self.reflectc(IsCons(s))),
-                Tup(_, _) => Ok(Cst(1)),
-                _ => Ok(Cst(0)),
-            },
-            Car(e) => match self.evalms(env, *e)? {
-                Code(s) => Ok(self.reflectc(Car(s))),
-                Tup(a, _) => Ok(*a),
-                _ => Err(Error::Type),
-            },
-            Cdr(e) => match self.evalms(env, *e)? {
-                Code(s) => Ok(self.reflectc(Cdr(s))),
-                Tup(_, b) => Ok(*b),
-                _ => Err(Error::Type),
-            },
-            Plus(e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => Ok(self.reflectc(Plus(s1, s2))),
-                (Cst(n1), Cst(n2)) => Ok(Cst(n1 + n2)),
-                _ => Err(Error::Type),
-            },
-            Minus(e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => Ok(self.reflectc(Minus(s1, s2))),
-                (Cst(n1), Cst(n2)) => Ok(Cst(n1 - n2)),
-                _ => Err(Error::Type),
-            },
-            Times(e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => Ok(self.reflectc(Times(s1, s2))),
-                (Cst(n1), Cst(n2)) => Ok(Cst(n1 * n2)),
-                _ => Err(Error::Type),
-            },
-            Eq(e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => Ok(self.reflectc(Eq(s1, s2))),
-                (Cst(n1), Cst(n2)) => Ok(Cst(if n1 == n2 { 1 } else { 0 })),
-                _ => Err(Error::Type),
+            Op2(op, e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
+                (Code(s1), Code(s2)) => Ok(self.reflectc(Op2(op, s1, s2))),
+                (Code(_), _) | (_, Code(_)) => Err(Error::Type),
+                (v1, v2) => {
+                    let (n1, n2) = Val::unwrap2_cst(v1, v2)?;
+                    match op {
+                        Op2Kind::Plus => Ok(Cst(n1 + n2)),
+                        Op2Kind::Minus => Ok(Cst(n1 - n2)),
+                        Op2Kind::Times => Ok(Cst(n1 * n2)),
+                        Op2Kind::Eq => Ok(Val::from(n1 == n2)),
+                    }
+                }
             },
             Lift(e) => {
                 let v = self.evalms(env, *e)?;
@@ -176,10 +167,7 @@ impl Interpreter {
                         self.fresh = env.len();
                         let mut block = Vec::new();
                         mem::swap(&mut block, &mut self.block);
-                        let e = match self.evalms(env, *e)? {
-                            Code(e) => *e,
-                            _ => return Err(Error::Type),
-                        };
+                        let e = self.evalms(env, *e)?.unwrap_code()?;
                         self.fresh = fresh;
                         self.block = block;
                         self.fold_let(e)
@@ -194,13 +182,10 @@ impl Interpreter {
         let fresh = self.fresh;
         let mut block = Vec::new();
         mem::swap(&mut block, &mut self.block);
-        let res = self.evalms(env, e)?;
+        let last = self.evalms(env, e)?.unwrap_code()?;
         self.fresh = fresh;
         self.block = block;
-        match res {
-            Code(last) => Ok(Code(Box::new(self.fold_let(*last)))),
-            _ => Err(Error::Type),
-        }
+        Ok(Code(Box::new(self.fold_let(last))))
     }
 
     fn fresh(&mut self) -> Exp {
@@ -224,10 +209,7 @@ impl Interpreter {
         let v = self.evalms(env, e)?;
         self.fresh = fresh;
         self.block = block;
-        Ok(self.fold_let(match v {
-            Code(e) => *e,
-            _ => return Err(Error::Type),
-        }))
+        Ok(self.fold_let(v.unwrap_code()?))
     }
 
     fn fold_let(&self, last: Exp) -> Exp {
@@ -236,5 +218,56 @@ impl Interpreter {
             e2 = Let(Box::new(e1.clone()), Box::new(e2));
         }
         e2
+    }
+}
+
+impl Val {
+    #[inline]
+    pub fn unwrap_cst(self) -> Result<Int> {
+        match self {
+            Cst(n) => Ok(n),
+            _ => Err(Error::Type),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_tup(self) -> Result<(Val, Val)> {
+        match self {
+            Tup(a, b) => Ok((*a, *b)),
+            _ => Err(Error::Type),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_clo(self) -> Result<(Env, Exp)> {
+        match self {
+            Clo(env, e) => Ok((env, *e)),
+            _ => Err(Error::Type),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_code(self) -> Result<Exp> {
+        match self {
+            Code(e) => Ok(*e),
+            _ => Err(Error::Type),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap2_cst(v1: Val, v2: Val) -> Result<(Int, Int)> {
+        Ok((v1.unwrap_cst()?, v2.unwrap_cst()?))
+    }
+
+    #[inline]
+    pub fn unwrap2_code(v1: Val, v2: Val) -> Result<(Exp, Exp)> {
+        Ok((v1.unwrap_code()?, v2.unwrap_code()?))
+    }
+}
+
+impl From<bool> for Val {
+    #[inline]
+    fn from(value: bool) -> Self {
+        Cst(if value { 1 } else { 0 })
     }
 }
