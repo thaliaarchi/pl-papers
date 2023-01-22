@@ -10,4 +10,5 @@ Models](https://faculty.cs.byu.edu/~kimball/630/) in Coq and Rust.
   2015) [[ACM](https://dl.acm.org/doi/10.1145/2897336.2897342),
   [alternate](https://lirias.kuleuven.be/retrieve/383155/)]
 - [cti](cti): Collapsing Towers of Interpreters (Amin and Rompf 2018)
-  [[ACM](https://dl.acm.org/doi/10.1145/3158140)]
+  [[ACM](https://dl.acm.org/doi/10.1145/3158140),
+  [code](https://github.com/TiarkRompf/collapsing-towers)]

@@ -3,20 +3,23 @@ use std::mem;
 use Exp::*;
 use Val::*;
 
-pub type Int = u32;
+pub type Int = i32;
 pub type Var = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Exp {
     Lit(Int),
-    Var(Var),
-    Lam(Box<Exp>),
-    App(Box<Exp>, Box<Exp>),
+    Sym(String),
     Cons(Box<Exp>, Box<Exp>),
+    Lam(Box<Exp>),
+
+    Var(Var),
     Let(Box<Exp>, Box<Exp>),
     If(Box<Exp>, Box<Exp>, Box<Exp>),
+    App(Box<Exp>, Box<Exp>),
     Op1(Op1Kind, Box<Exp>),
     Op2(Op2Kind, Box<Exp>, Box<Exp>),
+
     Lift(Box<Exp>),
     Run(Box<Exp>, Box<Exp>),
 }
@@ -24,6 +27,7 @@ pub enum Exp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op1Kind {
     IsNum,
+    IsStr,
     IsCons,
     Car,
     Cdr,
@@ -40,8 +44,10 @@ pub enum Op2Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Val {
     Cst(Int),
+    Str(String),
     Tup(Box<Val>, Box<Val>),
     Clo(Env, Box<Exp>),
+
     Code(Box<Exp>),
 }
 
@@ -73,6 +79,7 @@ impl Interpreter {
     pub fn lift(&mut self, v: Box<Val>) -> Result<Box<Exp>> {
         match *v {
             Cst(n) => Ok(Box::new(Lit(n))),
+            Str(s) => Ok(Box::new(Sym(s))),
             Tup(a, b) => Ok(self.reflect(Cons(a.unwrap_code()?, b.unwrap_code()?))),
             Clo(mut env2, e2) => {
                 env2.push(Code(self.fresh()));
@@ -92,6 +99,9 @@ impl Interpreter {
     pub fn evalms(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Val>> {
         match *e {
             Lit(n) => Ok(Box::new(Cst(n))),
+            Sym(s) => Ok(Box::new(Str(s))),
+            Cons(e1, e2) => Ok(Box::new(Tup(self.evalms(env, e1)?, self.evalms(env, e2)?))),
+            Lam(e) => Ok(Box::new(Clo(env.clone(), e))),
             Var(n) => match env.get(n as usize) {
                 Some(v) => Ok(Box::new(v.clone())),
                 None => Err(Error::Index {
@@ -99,13 +109,20 @@ impl Interpreter {
                     len: env.len(),
                 }),
             },
-            Cons(e1, e2) => Ok(Box::new(Tup(self.evalms(env, e1)?, self.evalms(env, e2)?))),
-            Lam(e) => Ok(Box::new(Clo(env.clone(), e))),
             Let(e1, e2) => {
                 let mut env1 = env.clone();
                 env1.push(*self.evalms(env, e1)?);
                 self.evalms(&env1, e2)
             }
+            If(c, a, b) => match *self.evalms(env, c)? {
+                Code(c1) => {
+                    let a2 = self.reifyc_evalms(&env, a)?;
+                    let b2 = self.reifyc_evalms(&env, b)?;
+                    Ok(self.reflectc(If(c1, a2, b2)))
+                }
+                Cst(n) => self.evalms(env, if n != 0 { a } else { b }),
+                _ => Err(Error::Type),
+            },
             App(e1, e2) => match (*self.evalms(env, e1)?, *self.evalms(env, e2)?) {
                 (Code(s1), Code(s2)) => Ok(self.reflectc(App(s1, s2))),
                 (Clo(env1, s1), v2) => {
@@ -116,19 +133,11 @@ impl Interpreter {
                 }
                 _ => Err(Error::Type),
             },
-            If(c, a, b) => match *self.evalms(env, c)? {
-                Code(c1) => {
-                    let a2 = self.reifyc_evalms(&env, a)?;
-                    let b2 = self.reifyc_evalms(&env, b)?;
-                    Ok(self.reflectc(If(c1, a2, b2)))
-                }
-                Cst(n) => self.evalms(env, if n != 0 { a } else { b }),
-                _ => Err(Error::Type),
-            },
             Op1(op, e) => match *self.evalms(env, e)? {
                 Code(s) => Ok(self.reflectc(Op1(op, s))),
                 v => match op {
                     Op1Kind::IsNum => Ok(Val::bool(matches!(v, Cst(_)))),
+                    Op1Kind::IsStr => Ok(Val::bool(matches!(v, Str(_)))),
                     Op1Kind::IsCons => Ok(Val::bool(matches!(v, Tup(_, _)))),
                     Op1Kind::Car => Ok(v.unwrap_tup()?.0),
                     Op1Kind::Cdr => Ok(v.unwrap_tup()?.1),
@@ -226,6 +235,14 @@ impl Val {
     pub fn unwrap_cst(self) -> Result<Int> {
         match self {
             Cst(n) => Ok(n),
+            _ => Err(Error::Type),
+        }
+    }
+
+    #[inline]
+    pub fn unwrap_str(self) -> Result<String> {
+        match self {
+            Str(s) => Ok(s),
             _ => Err(Error::Type),
         }
     }
