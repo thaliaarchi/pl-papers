@@ -1,5 +1,3 @@
-use std::mem;
-
 use Exp::*;
 use Val::*;
 
@@ -69,8 +67,12 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
+        Interpreter::with_fresh(0)
+    }
+
+    pub fn with_fresh(fresh: usize) -> Self {
         Interpreter {
-            fresh: 0,
+            fresh,
             block: Vec::new(),
         }
     }
@@ -89,10 +91,6 @@ impl Interpreter {
             }
             Code(e) => Ok(self.reflect(Lift(e))),
         }
-    }
-
-    pub fn liftc(&mut self, v: Box<Val>) -> Result<Box<Val>> {
-        Ok(Box::new(Code(self.lift(v)?)))
     }
 
     // Multi-stage evaluation
@@ -158,24 +156,17 @@ impl Interpreter {
             },
             Lift(e) => {
                 let v = self.evalms(env, e)?;
-                self.liftc(v)
+                Ok(Box::new(Code(self.lift(v)?)))
             }
+            // First argument decides whether to generate `Run` statement or
+            // run code directly.
             Run(b, e) => match *self.evalms(env, b)? {
                 Code(b1) => {
                     let e = self.reifyc_evalms(env, e)?;
                     Ok(self.reflectc(Run(b1, e)))
                 }
                 _ => {
-                    let e = {
-                        let fresh = self.fresh;
-                        self.fresh = env.len();
-                        let mut block = Vec::new();
-                        mem::swap(&mut block, &mut self.block);
-                        let e = self.evalms(env, e)?.unwrap_code()?;
-                        self.fresh = fresh;
-                        self.block = block;
-                        self.fold_let(e)
-                    };
+                    let e = self.reifyc_evalms_fresh(env, e, env.len())?;
                     self.evalmsg(env, e)
                 }
             },
@@ -183,13 +174,7 @@ impl Interpreter {
     }
 
     fn evalmsg(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Val>> {
-        let fresh = self.fresh;
-        let mut block = Vec::new();
-        mem::swap(&mut block, &mut self.block);
-        let last = self.evalms(env, e)?.unwrap_code()?;
-        self.fresh = fresh;
-        self.block = block;
-        Ok(Box::new(Code(self.fold_let(last))))
+        Ok(Box::new(Code(self.reifyc_evalms(env, e)?)))
     }
 
     fn fresh(&mut self) -> Box<Exp> {
@@ -207,12 +192,11 @@ impl Interpreter {
     }
 
     fn reifyc_evalms(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Exp>> {
-        let fresh = self.fresh;
-        let mut block = Vec::new();
-        mem::swap(&mut block, &mut self.block);
-        let v = self.evalms(env, e)?;
-        self.fresh = fresh;
-        self.block = block;
+        self.reifyc_evalms_fresh(env, e, self.fresh)
+    }
+
+    fn reifyc_evalms_fresh(&mut self, env: &Env, e: Box<Exp>, fresh: usize) -> Result<Box<Exp>> {
+        let v = Interpreter::with_fresh(fresh).evalms(env, e)?;
         Ok(self.fold_let(v.unwrap_code()?))
     }
 
@@ -279,5 +263,70 @@ impl Val {
     #[inline]
     pub fn unwrap2_code(v1: Val, v2: Val) -> Result<(Box<Exp>, Box<Exp>)> {
         Ok((v1.unwrap_code()?, v2.unwrap_code()?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test from POPL 2018 Scala artifact:
+    // https://github.com/TiarkRompf/collapsing-towers/blob/master/popl18/base.scala#L330-L364
+    #[test]
+    fn staged_factorial() {
+        /*
+          Pattern:
+            def f = fun { n => if (n != 0) f(n-1) else 1 }
+          Corresponds to:
+            val f = { () => lift({ n => if (n != 0) f()(n-1) else 1 }) }
+        */
+        let f_self = Box::new(App(Box::new(Var(0)), Box::new(Lit(99))));
+        let n = Box::new(Var(3));
+
+        let fac_body = Box::new(Lam(Box::new(If(
+            n.clone(),
+            Box::new(Op2(
+                Op2Kind::Times,
+                n.clone(),
+                Box::new(App(
+                    f_self,
+                    Box::new(Op2(Op2Kind::Minus, n, Box::new(Lift(Box::new(Lit(1)))))),
+                )),
+            )),
+            Box::new(Lift(Box::new(Lit(1)))),
+        ))));
+        let fac = Box::new(App(
+            Box::new(Lam(Box::new(Lift(fac_body)))),
+            Box::new(Lit(99)),
+        ));
+
+        let out = Box::new(Let(
+            Box::new(Lam(Box::new(Let(
+                Box::new(If(
+                    Box::new(Var(1)),
+                    Box::new(Let(
+                        Box::new(Op2(Op2Kind::Minus, Box::new(Var(1)), Box::new(Lit(1)))),
+                        Box::new(Let(
+                            Box::new(App(Box::new(Var(0)), Box::new(Var(2)))),
+                            Box::new(Let(
+                                Box::new(Op2(Op2Kind::Times, Box::new(Var(1)), Box::new(Var(3)))),
+                                Box::new(Var(4)),
+                            )),
+                        )),
+                    )),
+                    Box::new(Lit(1)),
+                )),
+                Box::new(Var(2)),
+            )))),
+            Box::new(Var(0)),
+        ));
+
+        let code = Interpreter::new().reifyc_evalms(&Vec::new(), fac).unwrap();
+        assert_eq!(out, code);
+
+        let res = Interpreter::new()
+            .reifyc_evalms(&Vec::new(), Box::new(App(code, Box::new(Lit(4)))))
+            .unwrap();
+        assert_eq!(Box::new(Lit(4)), res);
     }
 }
