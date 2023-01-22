@@ -84,103 +84,105 @@ impl Interpreter {
 
     // NBE-style polymorphic lift operator
     pub fn lift(&mut self, v: ValRef) -> Result<ExpRef> {
-        match &*v {
-            Cst(n) => Ok(new_lit(*n)),
-            Str(s) => Ok(new_sym(s.clone())),
-            Tup(v1, v2) => Ok(self.reflect(new_cons(v1.unwrap_code()?, v2.unwrap_code()?))),
+        Ok(match &*v {
+            Cst(n) => new_lit(*n),
+            Str(s) => new_sym(s.clone()),
+            Tup(v1, v2) => self.reflect(new_cons(v1.unwrap_code()?, v2.unwrap_code()?)),
             Clo(env2, e2) => {
                 let mut env2 = env2.clone();
                 env2.push(new_code(self.fresh()));
                 env2.push(new_code(self.fresh()));
                 let e = self.reifyc_evalms(&env2, *e2)?;
-                Ok(self.reflect(new_lam(e)))
+                self.reflect(new_lam(e))
             }
-            Code(e) => Ok(self.reflect(new_lift(*e))),
-        }
+            Code(e) => self.reflect(new_lift(*e)),
+        })
     }
 
     // Multi-stage evaluation
     pub fn evalms(&mut self, env: &Env, e: ExpRef) -> Result<ValRef> {
-        match &*e {
-            Lit(n) => Ok(new_cst(*n)),
-            Sym(s) => Ok(new_str(s.clone())),
-            Cons(e1, e2) => Ok(new_tup(self.evalms(env, *e1)?, self.evalms(env, *e2)?)),
-            Lam(e) => Ok(new_clo(env.clone(), *e)),
+        Ok(match &*e {
+            Lit(n) => new_cst(*n),
+            Sym(s) => new_str(s.clone()),
+            Cons(e1, e2) => new_tup(self.evalms(env, *e1)?, self.evalms(env, *e2)?),
+            Lam(e) => new_clo(env.clone(), *e),
             Var(n) => match env.get(*n) {
-                Some(v) => Ok(*v),
-                None => Err(Error::Index {
-                    index: *n,
-                    len: env.len(),
-                }),
+                Some(v) => *v,
+                None => {
+                    return Err(Error::Index {
+                        index: *n,
+                        len: env.len(),
+                    })
+                }
             },
             Let(e1, e2) => {
                 let mut env1 = env.clone();
                 env1.push(self.evalms(env, *e1)?);
-                self.evalms(&env1, *e2)
+                self.evalms(&env1, *e2)?
             }
             If(c, t, f) => match *self.evalms(env, *c)? {
                 Code(c1) => {
                     let t2 = self.reifyc_evalms(&env, *t)?;
                     let f2 = self.reifyc_evalms(&env, *f)?;
-                    Ok(self.reflectc(new_if(c1, t2, f2)))
+                    self.reflectc(new_if(c1, t2, f2))
                 }
-                Cst(n) => self.evalms(env, *if n != 0 { t } else { f }),
-                _ => Err(Error::Type),
+                Cst(n) => self.evalms(env, *if n != 0 { t } else { f })?,
+                _ => return Err(Error::Type),
             },
             App(e1, e2) => {
                 let v1 = self.evalms(env, *e1)?;
                 let v2 = self.evalms(env, *e2)?;
                 match (&*v1, &*v2) {
-                    (Code(s1), Code(s2)) => Ok(self.reflectc(new_app(*s1, *s2))),
+                    (Code(s1), Code(s2)) => self.reflectc(new_app(*s1, *s2)),
                     (Clo(env1, s1), _) => {
                         let mut env3 = env1.clone();
                         env3.push(new_clo(env1.clone(), *s1));
                         env3.push(v2);
-                        self.evalms(&env3, *s1)
+                        self.evalms(&env3, *s1)?
                     }
-                    _ => Err(Error::Type),
+                    _ => return Err(Error::Type),
                 }
             }
             Op1(op, e) => match &*self.evalms(env, *e)? {
-                Code(e) => Ok(self.reflectc(new_op1(*op, *e))),
+                Code(e) => self.reflectc(new_op1(*op, *e)),
                 v => match op {
-                    Op1Kind::IsNum => Ok(new_bool(matches!(v, Cst(_)))),
-                    Op1Kind::IsStr => Ok(new_bool(matches!(v, Str(_)))),
-                    Op1Kind::IsCons => Ok(new_bool(matches!(v, Tup(_, _)))),
-                    Op1Kind::Car => Ok(v.unwrap_tup()?.0),
-                    Op1Kind::Cdr => Ok(v.unwrap_tup()?.1),
+                    Op1Kind::IsNum => new_bool(matches!(v, Cst(_))),
+                    Op1Kind::IsStr => new_bool(matches!(v, Str(_))),
+                    Op1Kind::IsCons => new_bool(matches!(v, Tup(_, _))),
+                    Op1Kind::Car => v.unwrap_tup()?.0,
+                    Op1Kind::Cdr => v.unwrap_tup()?.1,
                 },
             },
             Op2(op, e1, e2) => match (&*self.evalms(env, *e1)?, &*self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => Ok(self.reflectc(new_op2(*op, *s1, *s2))),
-                (Code(_), _) | (_, Code(_)) => Err(Error::Type),
+                (Code(s1), Code(s2)) => self.reflectc(new_op2(*op, *s1, *s2)),
+                (Code(_), _) | (_, Code(_)) => return Err(Error::Type),
                 (v1, v2) => {
                     let (n1, n2) = Val::unwrap2_cst(v1, v2)?;
                     match op {
-                        Op2Kind::Plus => Ok(new_cst(n1 + n2)),
-                        Op2Kind::Minus => Ok(new_cst(n1 - n2)),
-                        Op2Kind::Times => Ok(new_cst(n1 * n2)),
-                        Op2Kind::Eq => Ok(new_bool(n1 == n2)),
+                        Op2Kind::Plus => new_cst(n1 + n2),
+                        Op2Kind::Minus => new_cst(n1 - n2),
+                        Op2Kind::Times => new_cst(n1 * n2),
+                        Op2Kind::Eq => new_bool(n1 == n2),
                     }
                 }
             },
             Lift(e) => {
                 let v = self.evalms(env, *e)?;
-                Ok(new_code(self.lift(v)?))
+                new_code(self.lift(v)?)
             }
             // First argument decides whether to generate `Run` statement or
             // run code directly.
             Run(c, e) => match *self.evalms(env, *c)? {
                 Code(b1) => {
                     let e = self.reifyc_evalms(env, *e)?;
-                    Ok(self.reflectc(new_run(b1, e)))
+                    self.reflectc(new_run(b1, e))
                 }
                 _ => {
                     let e = self.reifyc_evalms_fresh(env, *e, env.len())?;
-                    self.evalmsg(env, e)
+                    self.evalmsg(env, e)?
                 }
             },
-        }
+        })
     }
 
     fn evalmsg(&mut self, env: &Env, e: ExpRef) -> Result<ValRef> {
