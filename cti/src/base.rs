@@ -70,95 +70,90 @@ impl Interpreter {
     }
 
     // NBE-style polymorphic lift operator
-    pub fn lift(&mut self, v: Val) -> Result<Exp> {
-        match v {
-            Cst(n) => Ok(Lit(n)),
-            Tup(a, b) => {
-                Ok(self.reflect(Cons(Box::new(a.unwrap_code()?), Box::new(b.unwrap_code()?))))
-            }
+    pub fn lift(&mut self, v: Box<Val>) -> Result<Box<Exp>> {
+        match *v {
+            Cst(n) => Ok(Box::new(Lit(n))),
+            Tup(a, b) => Ok(self.reflect(Cons(a.unwrap_code()?, b.unwrap_code()?))),
             Clo(mut env2, e2) => {
-                env2.push(Code(Box::new(self.fresh())));
-                env2.push(Code(Box::new(self.fresh())));
-                let e = Box::new(self.reifyc_evalms(&env2, *e2)?);
+                env2.push(Code(self.fresh()));
+                env2.push(Code(self.fresh()));
+                let e = self.reifyc_evalms(&env2, e2)?;
                 Ok(self.reflect(Lam(e)))
             }
             Code(e) => Ok(self.reflect(Lift(e))),
         }
     }
 
-    pub fn liftc(&mut self, v: Val) -> Result<Val> {
-        Ok(Code(Box::new(self.lift(v)?)))
+    pub fn liftc(&mut self, v: Box<Val>) -> Result<Box<Val>> {
+        Ok(Box::new(Code(self.lift(v)?)))
     }
 
     // Multi-stage evaluation
-    pub fn evalms(&mut self, env: &Env, e: Exp) -> Result<Val> {
-        match e {
-            Lit(n) => Ok(Cst(n)),
+    pub fn evalms(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Val>> {
+        match *e {
+            Lit(n) => Ok(Box::new(Cst(n))),
             Var(n) => match env.get(n as usize) {
-                Some(v) => Ok(v.clone()),
+                Some(v) => Ok(Box::new(v.clone())),
                 None => Err(Error::Index {
                     index: n,
                     len: env.len(),
                 }),
             },
-            Cons(e1, e2) => Ok(Tup(
-                Box::new(self.evalms(env, *e1)?),
-                Box::new(self.evalms(env, *e2)?),
-            )),
-            Lam(e) => Ok(Clo(env.clone(), e)),
+            Cons(e1, e2) => Ok(Box::new(Tup(self.evalms(env, e1)?, self.evalms(env, e2)?))),
+            Lam(e) => Ok(Box::new(Clo(env.clone(), e))),
             Let(e1, e2) => {
                 let mut env1 = env.clone();
-                env1.push(self.evalms(env, *e1)?);
-                self.evalms(&env1, *e2)
+                env1.push(*self.evalms(env, e1)?);
+                self.evalms(&env1, e2)
             }
-            App(e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
+            App(e1, e2) => match (*self.evalms(env, e1)?, *self.evalms(env, e2)?) {
                 (Code(s1), Code(s2)) => Ok(self.reflectc(App(s1, s2))),
                 (Clo(env1, s1), v2) => {
                     let mut env3 = env1.clone();
                     env3.push(Clo(env1, s1.clone()));
                     env3.push(v2);
-                    self.evalms(&env3, *s1)
+                    self.evalms(&env3, s1)
                 }
                 _ => Err(Error::Type),
             },
-            If(c, a, b) => match self.evalms(env, *c)? {
+            If(c, a, b) => match *self.evalms(env, c)? {
                 Code(c1) => {
-                    let a2 = Box::new(self.reifyc_evalms(&env, *a)?);
-                    let b2 = Box::new(self.reifyc_evalms(&env, *b)?);
+                    let a2 = self.reifyc_evalms(&env, a)?;
+                    let b2 = self.reifyc_evalms(&env, b)?;
                     Ok(self.reflectc(If(c1, a2, b2)))
                 }
-                Cst(n) => self.evalms(env, *if n != 0 { a } else { b }),
+                Cst(n) => self.evalms(env, if n != 0 { a } else { b }),
                 _ => Err(Error::Type),
             },
-            Op1(op, e) => match self.evalms(env, *e)? {
+            Op1(op, e) => match *self.evalms(env, e)? {
                 Code(s) => Ok(self.reflectc(Op1(op, s))),
                 v => match op {
-                    Op1Kind::IsNum => Ok(Val::from(matches!(v, Cst(_)))),
-                    Op1Kind::IsCons => Ok(Val::from(matches!(v, Tup(_, _)))),
+                    Op1Kind::IsNum => Ok(Val::bool(matches!(v, Cst(_)))),
+                    Op1Kind::IsCons => Ok(Val::bool(matches!(v, Tup(_, _)))),
                     Op1Kind::Car => Ok(v.unwrap_tup()?.0),
                     Op1Kind::Cdr => Ok(v.unwrap_tup()?.1),
                 },
             },
-            Op2(op, e1, e2) => match (self.evalms(env, *e1)?, self.evalms(env, *e2)?) {
+            Op2(op, e1, e2) => match (*self.evalms(env, e1)?, *self.evalms(env, e2)?) {
                 (Code(s1), Code(s2)) => Ok(self.reflectc(Op2(op, s1, s2))),
                 (Code(_), _) | (_, Code(_)) => Err(Error::Type),
                 (v1, v2) => {
                     let (n1, n2) = Val::unwrap2_cst(v1, v2)?;
                     match op {
-                        Op2Kind::Plus => Ok(Cst(n1 + n2)),
-                        Op2Kind::Minus => Ok(Cst(n1 - n2)),
-                        Op2Kind::Times => Ok(Cst(n1 * n2)),
-                        Op2Kind::Eq => Ok(Val::from(n1 == n2)),
+                        Op2Kind::Plus => Ok(Box::new(Cst(n1 + n2))),
+                        Op2Kind::Minus => Ok(Box::new(Cst(n1 - n2))),
+                        Op2Kind::Times => Ok(Box::new(Cst(n1 * n2))),
+                        Op2Kind::Eq => Ok(Val::bool(n1 == n2)),
                     }
                 }
             },
             Lift(e) => {
-                let v = self.evalms(env, *e)?;
+                let v = self.evalms(env, e)?;
                 self.liftc(v)
             }
-            Run(b, e) => match self.evalms(env, *b)? {
+            Run(b, e) => match *self.evalms(env, b)? {
                 Code(b1) => {
-                    let e = Box::new(self.reifyc_evalms(env, *e)?);
+                    let e = self.reifyc_evalms(env, e)?;
                     Ok(self.reflectc(Run(b1, e)))
                 }
                 _ => {
@@ -167,7 +162,7 @@ impl Interpreter {
                         self.fresh = env.len();
                         let mut block = Vec::new();
                         mem::swap(&mut block, &mut self.block);
-                        let e = self.evalms(env, *e)?.unwrap_code()?;
+                        let e = self.evalms(env, e)?.unwrap_code()?;
                         self.fresh = fresh;
                         self.block = block;
                         self.fold_let(e)
@@ -178,31 +173,31 @@ impl Interpreter {
         }
     }
 
-    fn evalmsg(&mut self, env: &Env, e: Exp) -> Result<Val> {
+    fn evalmsg(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Val>> {
         let fresh = self.fresh;
         let mut block = Vec::new();
         mem::swap(&mut block, &mut self.block);
         let last = self.evalms(env, e)?.unwrap_code()?;
         self.fresh = fresh;
         self.block = block;
-        Ok(Code(Box::new(self.fold_let(last))))
+        Ok(Box::new(Code(self.fold_let(last))))
     }
 
-    fn fresh(&mut self) -> Exp {
+    fn fresh(&mut self) -> Box<Exp> {
         self.fresh += 1;
-        Var(self.fresh - 1)
+        Box::new(Var(self.fresh - 1))
     }
 
-    fn reflect(&mut self, s: Exp) -> Exp {
+    fn reflect(&mut self, s: Exp) -> Box<Exp> {
         self.block.push(s);
         self.fresh()
     }
 
-    fn reflectc(&mut self, s: Exp) -> Val {
-        Code(Box::new(self.reflect(s)))
+    fn reflectc(&mut self, s: Exp) -> Box<Val> {
+        Box::new(Code(self.reflect(s)))
     }
 
-    fn reifyc_evalms(&mut self, env: &Env, e: Exp) -> Result<Exp> {
+    fn reifyc_evalms(&mut self, env: &Env, e: Box<Exp>) -> Result<Box<Exp>> {
         let fresh = self.fresh;
         let mut block = Vec::new();
         mem::swap(&mut block, &mut self.block);
@@ -212,16 +207,21 @@ impl Interpreter {
         Ok(self.fold_let(v.unwrap_code()?))
     }
 
-    fn fold_let(&self, last: Exp) -> Exp {
+    fn fold_let(&self, last: Box<Exp>) -> Box<Exp> {
         let mut e2 = last;
         for e1 in self.block.iter().rev() {
-            e2 = Let(Box::new(e1.clone()), Box::new(e2));
+            e2 = Box::new(Let(Box::new(e1.clone()), e2));
         }
         e2
     }
 }
 
 impl Val {
+    #[inline]
+    pub fn bool(value: bool) -> Box<Val> {
+        Box::new(Cst(if value { 1 } else { 0 }))
+    }
+
     #[inline]
     pub fn unwrap_cst(self) -> Result<Int> {
         match self {
@@ -231,25 +231,25 @@ impl Val {
     }
 
     #[inline]
-    pub fn unwrap_tup(self) -> Result<(Val, Val)> {
+    pub fn unwrap_tup(self) -> Result<(Box<Val>, Box<Val>)> {
         match self {
-            Tup(a, b) => Ok((*a, *b)),
+            Tup(a, b) => Ok((a, b)),
             _ => Err(Error::Type),
         }
     }
 
     #[inline]
-    pub fn unwrap_clo(self) -> Result<(Env, Exp)> {
+    pub fn unwrap_clo(self) -> Result<(Env, Box<Exp>)> {
         match self {
-            Clo(env, e) => Ok((env, *e)),
+            Clo(env, e) => Ok((env, e)),
             _ => Err(Error::Type),
         }
     }
 
     #[inline]
-    pub fn unwrap_code(self) -> Result<Exp> {
+    pub fn unwrap_code(self) -> Result<Box<Exp>> {
         match self {
-            Code(e) => Ok(*e),
+            Code(e) => Ok(e),
             _ => Err(Error::Type),
         }
     }
@@ -260,14 +260,7 @@ impl Val {
     }
 
     #[inline]
-    pub fn unwrap2_code(v1: Val, v2: Val) -> Result<(Exp, Exp)> {
+    pub fn unwrap2_code(v1: Val, v2: Val) -> Result<(Box<Exp>, Box<Exp>)> {
         Ok((v1.unwrap_code()?, v2.unwrap_code()?))
-    }
-}
-
-impl From<bool> for Val {
-    #[inline]
-    fn from(value: bool) -> Self {
-        Cst(if value { 1 } else { 0 })
     }
 }
