@@ -60,7 +60,8 @@ impl Interpreter {
             Clo(mut env2, e2) => {
                 env2.push(Code(Box::new(self.fresh())));
                 env2.push(Code(Box::new(self.fresh())));
-                self.reflect(Lam(Box::new(self.reifyc(self.evalms(&env2, *e2)))))
+                let e = Box::new(self.reifyc(|| self.evalms(&env2, *e2)));
+                self.reflect(Lam(e))
             }
             Code(e) => self.reflect(Lift(e)),
         }
@@ -96,11 +97,11 @@ impl Interpreter {
                 _ => panic!(),
             },
             If(c, a, b) => match self.evalms(env, *c) {
-                Code(c1) => self.reflectc(If(
-                    c1,
-                    Box::new(self.reifyc(self.evalms(&env, *a))),
-                    Box::new(self.reifyc(self.evalms(&env, *b))),
-                )),
+                Code(c1) => {
+                    let a2 = Box::new(self.reifyc(|| self.evalms(&env, *a)));
+                    let b2 = Box::new(self.reifyc(|| self.evalms(&env, *b)));
+                    self.reflectc(If(c1, a2, b2))
+                }
                 Cst(n) => self.evalms(env, *if n != 0 { a } else { b }),
                 _ => panic!(),
             },
@@ -146,20 +147,23 @@ impl Interpreter {
             },
             Lift(e) => self.liftc(self.evalms(env, *e)),
             Run(b, e) => match self.evalms(env, *b) {
-                Code(b1) => self.reflectc(Run(b1, Box::new(self.reifyc(self.evalms(env, *e))))),
+                Code(b1) => {
+                    let e = Box::new(self.reifyc(|| self.evalms(env, *e)));
+                    self.reflectc(Run(b1, e))
+                }
                 _ => {
-                    let fresh = self.fresh;
-                    self.fresh = env.len();
-                    let v = self.evalms(env, *e);
-                    self.fresh = fresh;
-                    self.evalmsg(env, self.reifyc(v))
+                    let e = self.reifyc(|| {
+                        self.fresh = env.len();
+                        self.evalms(env, *e)
+                    });
+                    self.evalmsg(env, e)
                 }
             },
         }
     }
 
     fn evalmsg(&mut self, env: &Env, e: Exp) -> Val {
-        self.reifyv(self.evalms(env, e))
+        self.reifyv(|| self.evalms(env, e))
     }
 
     fn fresh(&mut self) -> Exp {
@@ -172,19 +176,53 @@ impl Interpreter {
         self.fresh()
     }
 
-    fn reify(&mut self, e: Exp) -> Exp {
-        todo!()
-    }
-
-    fn reifyc(&mut self, v: Val) -> Exp {
-        todo!()
-    }
-
     fn reflectc(&mut self, s: Exp) -> Val {
         Code(Box::new(self.reflect(s)))
     }
 
-    fn reifyv(&mut self, v: Val) -> Val {
-        todo!()
+    fn run<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
+        let fresh = self.fresh;
+        let block = self.block.clone();
+        let x = f();
+        self.fresh = fresh;
+        self.block = block;
+        x
+    }
+
+    fn reify<F: FnOnce() -> Exp>(&mut self, f: F) -> Exp {
+        self.run(|| {
+            self.block.clear();
+            self.fold_let(f())
+        })
+    }
+
+    fn reifyc<F: FnOnce() -> Val>(&mut self, f: F) -> Exp {
+        self.reify(|| match f() {
+            Code(e) => *e,
+            _ => panic!(),
+        })
+    }
+
+    fn reifyv<F: FnMut() -> Val>(&mut self, f: F) -> Val {
+        self.run(|| {
+            self.block = Vec::new();
+            let res = f();
+            if self.block.len() == 0 {
+                res
+            } else {
+                match res {
+                    Code(last) => Code(Box::new(self.fold_let(*last))),
+                    _ => panic!(),
+                }
+            }
+        })
+    }
+
+    fn fold_let(&self, last: Exp) -> Exp {
+        let mut e2 = last;
+        for e1 in self.block.iter().rev() {
+            e2 = Let(Box::new(e1.clone()), Box::new(e2));
+        }
+        e2
     }
 }
