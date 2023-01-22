@@ -1,8 +1,5 @@
 use internment::Intern;
 
-use Exp::*;
-use Val::*;
-
 pub type Int = i32;
 pub type Var = usize;
 
@@ -20,15 +17,15 @@ pub enum Exp {
     Let(ExpRef, ExpRef),
     If(ExpRef, ExpRef, ExpRef),
     App(ExpRef, ExpRef),
-    Op1(Op1Kind, ExpRef),
-    Op2(Op2Kind, ExpRef, ExpRef),
+    Op1(Op1, ExpRef),
+    Op2(Op2, ExpRef, ExpRef),
 
     Lift(ExpRef),
     Run(ExpRef, ExpRef),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Op1Kind {
+pub enum Op1 {
     IsNum,
     IsStr,
     IsCons,
@@ -37,7 +34,7 @@ pub enum Op1Kind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Op2Kind {
+pub enum Op2 {
     Plus,
     Minus,
     Times,
@@ -85,27 +82,27 @@ impl Interpreter {
     // NBE-style polymorphic lift operator
     pub fn lift(&mut self, v: ValRef) -> Result<ExpRef> {
         Ok(match &*v {
-            Cst(n) => new_lit(*n),
-            Str(s) => new_sym(s.clone()),
-            Tup(v1, v2) => self.reflect(new_cons(v1.unwrap_code()?, v2.unwrap_code()?)),
-            Clo(env2, e2) => {
+            Val::Cst(n) => new_lit(*n),
+            Val::Str(s) => new_sym(s.clone()),
+            Val::Tup(v1, v2) => self.reflect(new_cons(v1.unwrap_code()?, v2.unwrap_code()?)),
+            Val::Clo(env2, e2) => {
                 let mut env2 = env2.clone();
                 env2.push(new_code(self.fresh()));
                 env2.push(new_code(self.fresh()));
                 self.reflect(new_lam(self.reifyc_evalms(&env2, *e2)?))
             }
-            Code(e) => self.reflect(new_lift(*e)),
+            Val::Code(e) => self.reflect(new_lift(*e)),
         })
     }
 
     // Multi-stage evaluation
     pub fn evalms(&mut self, env: &Env, e: ExpRef) -> Result<ValRef> {
         Ok(match &*e {
-            Lit(n) => new_cst(*n),
-            Sym(s) => new_str(s.clone()),
-            Cons(e1, e2) => new_tup(self.evalms(env, *e1)?, self.evalms(env, *e2)?),
-            Lam(e) => new_clo(env.clone(), *e),
-            Var(n) => match env.get(*n) {
+            Exp::Lit(n) => new_cst(*n),
+            Exp::Sym(s) => new_str(s.clone()),
+            Exp::Cons(e1, e2) => new_tup(self.evalms(env, *e1)?, self.evalms(env, *e2)?),
+            Exp::Lam(e) => new_clo(env.clone(), *e),
+            Exp::Var(n) => match env.get(*n) {
                 Some(v) => *v,
                 None => {
                     return Err(Error::Index {
@@ -114,26 +111,26 @@ impl Interpreter {
                     })
                 }
             },
-            Let(e1, e2) => {
+            Exp::Let(e1, e2) => {
                 let mut env1 = env.clone();
                 env1.push(self.evalms(env, *e1)?);
                 self.evalms(&env1, *e2)?
             }
-            If(c, t, f) => match *self.evalms(env, *c)? {
-                Code(c1) => {
+            Exp::If(c, t, f) => match *self.evalms(env, *c)? {
+                Val::Code(c1) => {
                     let t2 = self.reifyc_evalms(&env, *t)?;
                     let f2 = self.reifyc_evalms(&env, *f)?;
                     self.reflectc(new_if(c1, t2, f2))
                 }
-                Cst(n) => self.evalms(env, *if n != 0 { t } else { f })?,
+                Val::Cst(n) => self.evalms(env, *if n != 0 { t } else { f })?,
                 _ => return Err(Error::Type),
             },
-            App(e1, e2) => {
+            Exp::App(e1, e2) => {
                 let v1 = self.evalms(env, *e1)?;
                 let v2 = self.evalms(env, *e2)?;
                 match (&*v1, &*v2) {
-                    (Code(s1), Code(s2)) => self.reflectc(new_app(*s1, *s2)),
-                    (Clo(env1, s1), _) => {
+                    (Val::Code(s1), Val::Code(s2)) => self.reflectc(new_app(*s1, *s2)),
+                    (Val::Clo(env1, s1), _) => {
                         let mut env3 = env1.clone();
                         env3.push(new_clo(env1.clone(), *s1));
                         env3.push(v2);
@@ -142,37 +139,37 @@ impl Interpreter {
                     _ => return Err(Error::Type),
                 }
             }
-            Op1(op, e) => match &*self.evalms(env, *e)? {
-                Code(e) => self.reflectc(new_op1(*op, *e)),
+            Exp::Op1(op, e) => match &*self.evalms(env, *e)? {
+                Val::Code(e) => self.reflectc(new_op1(*op, *e)),
                 v => match op {
-                    Op1Kind::IsNum => new_bool(matches!(v, Cst(_))),
-                    Op1Kind::IsStr => new_bool(matches!(v, Str(_))),
-                    Op1Kind::IsCons => new_bool(matches!(v, Tup(_, _))),
-                    Op1Kind::Car => v.unwrap_tup()?.0,
-                    Op1Kind::Cdr => v.unwrap_tup()?.1,
+                    Op1::IsNum => new_bool(matches!(v, Val::Cst(_))),
+                    Op1::IsStr => new_bool(matches!(v, Val::Str(_))),
+                    Op1::IsCons => new_bool(matches!(v, Val::Tup(_, _))),
+                    Op1::Car => v.unwrap_tup()?.0,
+                    Op1::Cdr => v.unwrap_tup()?.1,
                 },
             },
-            Op2(op, e1, e2) => match (&*self.evalms(env, *e1)?, &*self.evalms(env, *e2)?) {
-                (Code(s1), Code(s2)) => self.reflectc(new_op2(*op, *s1, *s2)),
-                (Code(_), _) | (_, Code(_)) => return Err(Error::Type),
+            Exp::Op2(op, e1, e2) => match (&*self.evalms(env, *e1)?, &*self.evalms(env, *e2)?) {
+                (Val::Code(s1), Val::Code(s2)) => self.reflectc(new_op2(*op, *s1, *s2)),
+                (Val::Code(_), _) | (_, Val::Code(_)) => return Err(Error::Type),
                 (v1, v2) => {
                     let (n1, n2) = Val::unwrap2_cst(v1, v2)?;
                     match op {
-                        Op2Kind::Plus => new_cst(n1 + n2),
-                        Op2Kind::Minus => new_cst(n1 - n2),
-                        Op2Kind::Times => new_cst(n1 * n2),
-                        Op2Kind::Eq => new_bool(n1 == n2),
+                        Op2::Plus => new_cst(n1 + n2),
+                        Op2::Minus => new_cst(n1 - n2),
+                        Op2::Times => new_cst(n1 * n2),
+                        Op2::Eq => new_bool(n1 == n2),
                     }
                 }
             },
-            Lift(e) => {
+            Exp::Lift(e) => {
                 let v = self.evalms(env, *e)?;
                 new_code(self.lift(v)?)
             }
             // First argument decides whether to generate `Run` statement or
             // run code directly.
-            Run(c, e) => match *self.evalms(env, *c)? {
-                Code(b1) => self.reflectc(new_run(b1, self.reifyc_evalms(env, *e)?)),
+            Exp::Run(c, e) => match *self.evalms(env, *c)? {
+                Val::Code(b1) => self.reflectc(new_run(b1, self.reifyc_evalms(env, *e)?)),
                 _ => self.evalmsg(env, self.reifyc_evalms_fresh(env, *e, env.len())?)?,
             },
         })
@@ -218,7 +215,7 @@ impl Val {
     #[inline]
     pub fn unwrap_cst(&self) -> Result<Int> {
         match self {
-            Cst(n) => Ok(*n),
+            Val::Cst(n) => Ok(*n),
             _ => Err(Error::Type),
         }
     }
@@ -226,7 +223,7 @@ impl Val {
     #[inline]
     pub fn unwrap_str(&self) -> Result<&String> {
         match self {
-            Str(s) => Ok(s),
+            Val::Str(s) => Ok(s),
             _ => Err(Error::Type),
         }
     }
@@ -234,7 +231,7 @@ impl Val {
     #[inline]
     pub fn unwrap_tup(&self) -> Result<(ValRef, ValRef)> {
         match self {
-            Tup(a, b) => Ok((*a, *b)),
+            Val::Tup(a, b) => Ok((*a, *b)),
             _ => Err(Error::Type),
         }
     }
@@ -242,7 +239,7 @@ impl Val {
     #[inline]
     pub fn unwrap_clo(&self) -> Result<(&Env, ExpRef)> {
         match self {
-            Clo(env, e) => Ok((env, *e)),
+            Val::Clo(env, e) => Ok((env, *e)),
             _ => Err(Error::Type),
         }
     }
@@ -250,7 +247,7 @@ impl Val {
     #[inline]
     pub fn unwrap_code(&self) -> Result<ExpRef> {
         match self {
-            Code(e) => Ok(*e),
+            Val::Code(e) => Ok(*e),
             _ => Err(Error::Type),
         }
     }
@@ -290,10 +287,10 @@ pub fn new_if(c: ExpRef, a: ExpRef, b: ExpRef) -> ExpRef {
 pub fn new_app(e1: ExpRef, e2: ExpRef) -> ExpRef {
     Intern::new(Exp::App(e1, e2))
 }
-pub fn new_op1(op: Op1Kind, e: ExpRef) -> ExpRef {
+pub fn new_op1(op: Op1, e: ExpRef) -> ExpRef {
     Intern::new(Exp::Op1(op, e))
 }
-pub fn new_op2(op: Op2Kind, e1: ExpRef, e2: ExpRef) -> ExpRef {
+pub fn new_op2(op: Op2, e1: ExpRef, e2: ExpRef) -> ExpRef {
     Intern::new(Exp::Op2(op, e1, e2))
 }
 pub fn new_lift(e: ExpRef) -> ExpRef {
@@ -304,32 +301,32 @@ pub fn new_run(b: ExpRef, e: ExpRef) -> ExpRef {
 }
 
 pub fn new_is_num(e: ExpRef) -> ExpRef {
-    new_op1(Op1Kind::IsNum, e)
+    new_op1(Op1::IsNum, e)
 }
 pub fn new_is_str(e: ExpRef) -> ExpRef {
-    new_op1(Op1Kind::IsStr, e)
+    new_op1(Op1::IsStr, e)
 }
 pub fn new_is_cons(e: ExpRef) -> ExpRef {
-    new_op1(Op1Kind::IsCons, e)
+    new_op1(Op1::IsCons, e)
 }
 pub fn new_car(e: ExpRef) -> ExpRef {
-    new_op1(Op1Kind::Car, e)
+    new_op1(Op1::Car, e)
 }
 pub fn new_cdr(e: ExpRef) -> ExpRef {
-    new_op1(Op1Kind::Cdr, e)
+    new_op1(Op1::Cdr, e)
 }
 
 pub fn new_plus(e1: ExpRef, e2: ExpRef) -> ExpRef {
-    new_op2(Op2Kind::Plus, e1, e2)
+    new_op2(Op2::Plus, e1, e2)
 }
 pub fn new_minus(e1: ExpRef, e2: ExpRef) -> ExpRef {
-    new_op2(Op2Kind::Minus, e1, e2)
+    new_op2(Op2::Minus, e1, e2)
 }
 pub fn new_times(e1: ExpRef, e2: ExpRef) -> ExpRef {
-    new_op2(Op2Kind::Times, e1, e2)
+    new_op2(Op2::Times, e1, e2)
 }
 pub fn new_eq(e1: ExpRef, e2: ExpRef) -> ExpRef {
-    new_op2(Op2Kind::Eq, e1, e2)
+    new_op2(Op2::Eq, e1, e2)
 }
 
 pub fn new_cst(n: Int) -> ValRef {
