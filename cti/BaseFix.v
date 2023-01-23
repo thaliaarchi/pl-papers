@@ -48,6 +48,16 @@ Inductive val :=
   | VCode (e0 : exp)
   | VErr (err : error).
 
+Notation ECar := (EOp1 OCar).
+Notation ECdr := (EOp1 OCdr).
+Notation EIsNat := (EOp1 OIsNat).
+Notation EIsStr := (EOp1 OIsStr).
+Notation EIsPair := (EOp1 OIsPair).
+Notation EAdd := (EOp2 OAdd).
+Notation ESub := (EOp2 OSub).
+Notation EMul := (EOp2 OMul).
+Notation EEq := (EOp2 OEq).
+
 Definition lookup_exp (ρ : list exp) (n : nat) : exp :=
   nth_default (EErr ErrUnboundVar) (rev ρ) n.
 
@@ -63,9 +73,7 @@ Definition reflect (s : state) (e : exp) : state * exp :=
   let (n, acc) := s in fresh (n, e :: acc).
 
 Definition reify (sρ : state * exp) : exp :=
-  match sρ with
-  | ((_, acc), ρ) => fold_right ELet ρ (rev acc)
-  end.
+  let '((_, acc), ρ) := sρ in fold_right ELet ρ (rev acc).
 
 Fixpoint anf (s : state) (ρ : list exp) (e : exp) : state * exp :=
   match e with
@@ -265,6 +273,7 @@ with lift (depth : nat) (s : state) (v : val) : state * exp :=
 Definition eval0 (e : exp) : state * val :=
   eval 100 (0, []) [] e.
 
+Module Tests.
 Example ex0 : eval0 (ELam (EVar 1))                                  = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
 Example ex1 : eval0 (anf0 (ELam (EVar 1)))                           = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
 Example ex2 : eval0 (ELam (ELam (EVar 1)))                           = ((0, []), VClo [] (ELam (EVar 1))).                            reflexivity. Qed.
@@ -275,3 +284,31 @@ Example ex6 : reifyc (eval0 (ELift (ELam (ELift (ELam (EVar 1))))))  = ELet (ELa
 Example ex7 : anf0 (ELam (ELam (EVar 1)))                            = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
 Example ex8 : eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
 Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELam (ELet (EApp (EVar 0) (EVar 1)) (EVar 2))) (EVar 0). reflexivity. Qed.
+
+(* Test from POPL 2018 Scala artifact:
+   https://github.com/TiarkRompf/collapsing-towers/blob/master/popl18/base.scala#L330-L364 *)
+(*
+  Pattern:
+    def f = fun { n => if (n != 0) f(n-1) else 1 }
+  Corresponds to:
+    val f = { () => lift({ n => if (n != 0) f()(n-1) else 1 }) }
+*)
+Definition f_self := EApp (EVar 0) (ENat 99).
+Definition n := EVar 3.
+Definition fac_body := ELam (EIf n
+                                 (EMul n (EApp f_self (ESub n (ELift (ENat 1)))))
+                                 (ELift (ENat 1))).
+Definition fac := EApp (ELam (ELift fac_body)) (ENat 99).
+
+Definition fac_out :=
+  ELet (ELam (ELet (EIf (EVar 1)
+                        (ELet (ESub (EVar 1) (ENat 1))
+                              (ELet (EApp (EVar 0) (EVar 2))
+                                    (ELet (EMul (EVar 1) (EVar 3))
+                                          (EVar 4))))
+                        (ENat 1))
+             (EVar 2)))
+       (EVar 0).
+
+Example factorial : reifyc (eval0 fac) = fac_out. Admitted.
+End Tests.
