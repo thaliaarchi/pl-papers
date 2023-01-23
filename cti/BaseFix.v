@@ -299,21 +299,31 @@ Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELa
   Corresponds to:
     val f = { () => lift({ n => if (n != 0) f()(n-1) else 1 }) }
 *)
-Definition f_self := EApp (EVar 0) (ENat 99).
+
+(*
+  ((lambda f _ (lift (lambda _ n
+      (if n (mul n ((f 99) (sub n (lift (nat 1)))))
+            (lift (nat 1))))))
+   99)
+*)
+(* 99 is for nullary apply and is discarded *)
+Definition f_self := EVar 0.
 Definition n := EVar 3.
-Definition fac_body := ELam (EIf n
-                                 (EMul n (EApp f_self (ESub n (ELift (ENat 1)))))
-                                 (ELift (ENat 1))).
-Definition fac := EApp (ELam (ELift fac_body)) (ENat 99).
+Definition fac :=
+  EApp (ELam (*f _*) (ELift (ELam (*_ n*)
+         (EIf n
+              (EMul n (EApp (EApp f_self (ENat 99)) (ESub n (ELift (ENat 1)))))
+              (ELift (ENat 1))))))
+       (ENat 99).
 
 Definition fac_out :=
   ELet (ELam (ELet (EIf (EVar 1)
                         (ELet (ESub (EVar 1) (ENat 1))
-                              (ELet (EApp (EVar 0) (EVar 2))
-                                    (ELet (EMul (EVar 1) (EVar 3))
-                                          (EVar 4))))
+                        (ELet (EApp (EVar 0) (EVar 2))
+                        (ELet (EMul (EVar 1) (EVar 3))
+                        (EVar 4))))
                         (ENat 1))
-             (EVar 2)))
+               (EVar 2)))
        (EVar 0).
 
 Example factorial : reifyc (eval0 fac) = fac_out. Admitted.
