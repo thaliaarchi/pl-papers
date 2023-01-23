@@ -59,6 +59,11 @@ Notation ESub := (EOp2 OSub).
 Notation EMul := (EOp2 OMul).
 Notation EEq := (EOp2 OEq).
 
+Definition exp_of_string (t : string) := EStr t.
+Definition val_of_string (t : string) := VStr t.
+Coercion exp_of_string : string >-> exp.
+Coercion val_of_string : string >-> val.
+
 Definition lookup_exp (ρ : list exp) (n : nat) : exp :=
   nth_default (EErr ErrUnboundVar) (rev ρ) n.
 
