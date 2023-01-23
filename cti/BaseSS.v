@@ -51,7 +51,7 @@ Definition lit_of_bool (b : bool) : exp :=
 
 Notation "'?'" := (Lit 42).
 
-Reserved Notation "st '-->' st'" (at level 40).
+Reserved Notation "s '-->' s'" (at level 40).
 
 (* Reduction rules *)
 Inductive step : env * exp -> env * exp -> Prop :=
@@ -96,4 +96,4 @@ Inductive step : env * exp -> env * exp -> Prop :=
                                          (ρ, Run v1 (Code e1))                 --> (ρ, e2)
   | S_Reflect_Code : forall ρ e,         (ρ, Reflect (Code e))                 --> (ρ, ?)
   | S_LetC : forall ρ e1 e2,             (ρ, LetC e1 (Code e2))                --> (ρ, Code (Let e1 e2))
-  where "st '-->' st'" := (step st st').
+  where "s '-->' s'" := (step s s').

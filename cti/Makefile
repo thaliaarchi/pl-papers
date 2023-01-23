@@ -1,4 +1,4 @@
-VFILES := BaseSS.v BaseBS.v
+VFILES := BaseSS.v BaseBS.v BaseFix.v
 
 build: Makefile.coq
 	$(MAKE) -f Makefile.coq
