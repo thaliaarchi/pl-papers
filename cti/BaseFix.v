@@ -23,7 +23,8 @@ Inductive error :=
   | ErrAppExpectedClo
   | ErrInvalidOp
   | ErrStage
-  | ErrExceededDepth.
+  | ErrExceededDepth
+  | ErrPinkEval.
 
 Inductive exp :=
   | ENat (n : nat)
