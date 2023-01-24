@@ -64,6 +64,89 @@ Definition val_of_string (t : string) := VStr t.
 Coercion exp_of_string : string >-> exp.
 Coercion val_of_string : string >-> val.
 
+Fixpoint list_eq {A : Type} (eq : A -> A -> bool) (a b : list A) : bool :=
+  match a, b with
+  | ha :: a', hb :: b' => eq ha hb && list_eq eq a' b'
+  | _, _ => false
+  end.
+Definition op1_eq (a b : op1) : bool :=
+  match a, b with
+  | OCar, OCar | OCdr, OCdr
+  | OIsNat, OIsNat | OIsStr, OIsStr | OIsPair, OIsPair => true
+  | _, _ => false
+  end.
+Definition op2_eq (a b : op2) : bool :=
+  match a, b with
+  | OAdd, OAdd | OSub, OSub | OMul, OMul | OEq, OEq => true
+  | _, _ => false
+  end.
+Definition error_eq (a b : error) : bool :=
+  match a, b with
+  | ErrUnboundVar, ErrUnboundVar | ErrExpectedCode, ErrExpectedCode
+  | ErrIfExpectedNat, ErrIfExpectedNat | ErrAppExpectedClo, ErrAppExpectedClo
+  | ErrInvalidOp, ErrInvalidOp | ErrStage, ErrStage
+  | ErrExceededDepth, ErrExceededDepth | ErrPinkEval, ErrPinkEval => true
+  | _, _ => false
+  end.
+Fixpoint exp_eq (a b : exp) : bool :=
+  match a, b with
+  | ENat n_a, ENat n_b => (n_a =? n_b)%nat
+  | EStr t_a, EStr t_b => (t_a =? t_b)%string
+  | ECons e0_a e1_a, ECons e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
+  | ELam e0_a, ELam e0_b => exp_eq e0_a e0_b
+  | ELet e0_a e1_a, ELet e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
+  | EVar x_a, EVar x_b => x_a =? x_b
+  | EIf e0_a e1_a e2_a, EIf e0_b e1_b e2_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b && exp_eq e2_a e2_b
+  | EApp e0_a e1_a, EApp e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
+  | EOp1 op_a e0_a, EOp1 op_b e0_b => op1_eq op_a op_b && exp_eq e0_a e0_b
+  | EOp2 op_a e0_a e1_a, EOp2 op_b e0_b e1_b => op2_eq op_a op_b && exp_eq e0_a e0_b && exp_eq e1_a e1_b
+  | ELift e0_a, ELift e0_b => exp_eq e0_a e0_b
+  | ERun e0_a e1_a, ERun e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
+  | EErr err_a, EErr err_b => error_eq err_a err_b
+  | _, _ => false
+  end.
+(* TODO: Use Function or Program Fixpoint to resolve decreasing argument *)
+Fixpoint val_eq' (depth : nat) (a b : val) : bool :=
+  match depth with
+  | 0 => false
+  | S depth =>
+      match a, b with
+      | VNat n_a, VNat n_b => (n_a =? n_b)%nat
+      | VStr t_a, VStr t_b => (t_a =? t_b)%string
+      | VPair v0_a v1_a, VPair v0_b v1_b => val_eq' depth v0_a v0_b && val_eq' depth v1_a v1_b
+      | VClo ρ_a e0_a, VClo ρ_b e0_b => env_eq' depth ρ_a ρ_b && exp_eq e0_a e0_b
+      | VCode e0_a, VCode e0_b => exp_eq e0_a e0_b
+      | VErr err_a, VErr err_b => error_eq err_a err_b
+      | _, _ => false
+      end
+  end
+with env_eq' (depth : nat) (a b : list val) : bool :=
+  match depth with
+  | 0 => false
+  | S depth =>
+      match a, b with
+      | ha :: a', hb :: b' => val_eq' depth ha hb && env_eq' depth a' b'
+      | _, _ => false
+      end
+  end.
+Definition val_eq (a b : val) : bool := val_eq' 100 a b.
+Definition env_eq (a b : list val) : bool := env_eq' 100 a b.
+
+Lemma op1_eq_refl : forall op, op1_eq op op = true.
+Proof. destruct op; reflexivity. Qed.
+Lemma op2_eq_refl : forall op, op2_eq op op = true.
+Proof. destruct op; reflexivity. Qed.
+Lemma error_eq_refl : forall err, error_eq err err = true.
+Proof. destruct err; reflexivity. Qed.
+Lemma exp_eq_refl : forall e, exp_eq e e = true.
+Proof.
+  induction e; cbn;
+  repeat rewrite Bool.andb_true_iff; repeat split;
+  try assumption.
+  apply Nat.eqb_refl. apply String.eqb_refl. apply Nat.eqb_refl.
+  apply op1_eq_refl. apply op2_eq_refl. apply error_eq_refl.
+Qed.
+
 Definition lookup_exp (ρ : list exp) (n : nat) : exp :=
   nth_default (EErr ErrUnboundVar) (rev ρ) n.
 
