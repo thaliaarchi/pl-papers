@@ -1,5 +1,6 @@
 Require Import String Arith List.
 Import ListNotations IfNotations.
+Open Scope bool_scope.
 
 (* λ⇅ multi-level core language *)
 
@@ -156,27 +157,37 @@ Definition lookup_val (ρ : list val) (n : nat) : val :=
 Record state := State {
   next_i : nat; (* next fresh de Bruijn index *)
   acc : list exp; (* reflect acc *)
+  memo : list (nat * list val * exp); (* memoized closures *)
 }.
 
-Notation "⟨ i , acc ⟩" := (State i acc) (* for printing *)
-                          (format "⟨ i ,  acc ⟩").
+Notation "⟨ i , acc , memo ⟩" := (State i acc memo) (* for printing *)
+                                 (format "⟨ i ,  acc ,  memo ⟩").
 
-Definition mk_state : state := State 0 [].
+Definition mk_state : state := State 0 [] [].
 
 Definition set_next_i (s : state) (i : nat) : state :=
-  let (_, acc) := s in State i acc.
+  let (_, acc, memo) := s in State i acc memo.
 
 Definition clear_acc (s : state) : state :=
-  let (i, _) := s in State i [].
+  let (i, _, memo) := s in State i [] memo.
+
+Fixpoint lookup_memo_list l ρ e : option exp :=
+  match l with
+  | (n, ρ0, e0) :: l' => if env_eq ρ ρ0 && exp_eq e e0 then Some (EVar n)
+                         else lookup_memo_list l' ρ e
+  | [] => None
+  end.
+Definition lookup_memo (s : state) (ρ : list val) (e : exp) : option exp :=
+  lookup_memo_list s.(memo) ρ e.
 
 Definition fresh (s : state) : state * exp :=
-  let (i, acc) := s in ((State (1 + i) acc), EVar i).
+  let (i, acc, memo) := s in ((State (1 + i) acc memo), EVar i).
 
 Definition reflect (s : state) (e : exp) : state * exp :=
-  let (i, acc) := s in fresh (State i (e :: acc)).
+  let (i, acc, memo) := s in fresh (State i (e :: acc) memo).
 
 Definition reify (sρ : state * exp) : exp :=
-  let '((State _ acc), ρ) := sρ in fold_right ELet ρ (rev acc).
+  let '((State _ acc _), ρ) := sρ in fold_right ELet ρ (rev acc).
 
 Fixpoint anf (s : state) (ρ : list exp) (e : exp) : state * exp :=
   match e with
@@ -238,7 +249,7 @@ Definition reflectc (s : state) (e : exp) : state * val :=
 
 Definition reifyv (sv : state * val) : val :=
   match sv with
-  | ((State _ []), v) => v
+  | ((State _ [] _), v) => v
   | (s, VCode e0) => VCode (reify (s, e0))
   | (s, VErr err) => VErr err
   | _ => VErr ErrExpectedCode
@@ -360,13 +371,17 @@ with lift (depth : nat) (s : state) (v : val) : state * exp :=
           | _, _ => (s, EErr ErrExpectedCode)
           end
       | VClo ρ e0 =>
-          let (s0, v0) := fresh s in
-          let (s1, v1) := fresh s0 in
-          let (s2, v2) := eval depth (clear_acc s1) (VCode v1 :: VCode v0 :: ρ) e0 in
-          match v2 with
-          | VErr err => (s0, EErr err)
-          | VCode e2 => reflect (State s.(next_i) s1.(acc)) (ELam (reify (s2, e2)))
-          | _ => (s0, EErr ErrExpectedCode)
+          match lookup_memo s ρ e0 with
+          | Some e => (s, e)
+          | None =>
+              let (s0, v0) := fresh s in
+              let (s1, v1) := fresh s0 in
+              let (s2, v2) := eval depth (clear_acc s1) (VCode v1 :: VCode v0 :: ρ) e0 in
+              match v2 with
+              | VErr err => (s0, EErr err)
+              | VCode e2 => reflect (State s.(next_i) s1.(acc) s2.(memo)) (ELam (reify (s2, e2)))
+              | _ => (s0, EErr ErrExpectedCode)
+              end
           end
       | VCode e0 => reflect s (ELift e0)
       | VErr err => (s, EErr err)
