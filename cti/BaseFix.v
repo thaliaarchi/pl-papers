@@ -32,7 +32,7 @@ Inductive exp :=
   | ECons (e0 e1 : exp)
   | ELam (e0 : exp)
   | ELet (e0 e1 : exp)
-  | EVar (x : nat)
+  | EVar (i : nat)
   | EIf (e0 e1 e2 : exp)
   | EApp (e0 e1 : exp)
   | EOp1 (op : op1) (e0 : exp)
@@ -95,7 +95,7 @@ Fixpoint exp_eq (a b : exp) : bool :=
   | ECons e0_a e1_a, ECons e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
   | ELam e0_a, ELam e0_b => exp_eq e0_a e0_b
   | ELet e0_a e1_a, ELet e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
-  | EVar x_a, EVar x_b => x_a =? x_b
+  | EVar i_a, EVar i_b => i_a =? i_b
   | EIf e0_a e1_a e2_a, EIf e0_b e1_b e2_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b && exp_eq e2_a e2_b
   | EApp e0_a e1_a, EApp e0_b e1_b => exp_eq e0_a e0_b && exp_eq e1_a e1_b
   | EOp1 op_a e0_a, EOp1 op_b e0_b => op1_eq op_a op_b && exp_eq e0_a e0_b
@@ -153,16 +153,30 @@ Definition lookup_exp (ρ : list exp) (n : nat) : exp :=
 Definition lookup_val (ρ : list val) (n : nat) : val :=
   nth_default (VErr ErrUnboundVar) (rev ρ) n.
 
-Definition state : Type := (nat * list exp). (* fresh, acc *)
+Record state := State {
+  next_i : nat; (* next fresh de Bruijn index *)
+  acc : list exp; (* reflect acc *)
+}.
+
+Notation "⟨ i , acc ⟩" := (State i acc) (* for printing *)
+                          (format "⟨ i ,  acc ⟩").
+
+Definition mk_state : state := State 0 [].
+
+Definition set_next_i (s : state) (i : nat) : state :=
+  let (_, acc) := s in State i acc.
+
+Definition clear_acc (s : state) : state :=
+  let (i, _) := s in State i [].
 
 Definition fresh (s : state) : state * exp :=
-  let (n, acc) := s in ((1 + n, acc), EVar n).
+  let (i, acc) := s in ((State (1 + i) acc), EVar i).
 
 Definition reflect (s : state) (e : exp) : state * exp :=
-  let (n, acc) := s in fresh (n, e :: acc).
+  let (i, acc) := s in fresh (State i (e :: acc)).
 
 Definition reify (sρ : state * exp) : exp :=
-  let '((_, acc), ρ) := sρ in fold_right ELet ρ (rev acc).
+  let '((State _ acc), ρ) := sρ in fold_right ELet ρ (rev acc).
 
 Fixpoint anf (s : state) (ρ : list exp) (e : exp) : state * exp :=
   match e with
@@ -175,16 +189,16 @@ Fixpoint anf (s : state) (ρ : list exp) (e : exp) : state * exp :=
   | ELam e0 =>
       let (s0, v0) := fresh s in
       let (s1, v1) := fresh s0 in
-      reflect (fst s, snd s1)
-              (ELam (reify (anf (fst s1, []) (v1 :: v0 :: ρ) e0)))
+      reflect (set_next_i s1 s.(next_i))
+              (ELam (reify (anf (clear_acc s1) (v1 :: v0 :: ρ) e0)))
   | ELet e0 e1 =>
       let (s, v0) := anf s ρ e0 in
       anf s (v0 :: ρ) e1
-  | EVar x => (s, lookup_exp ρ x)
+  | EVar i => (s, lookup_exp ρ i)
   | EIf e0 e1 e2 =>
       let (s, v0) := anf s ρ e0 in
-      reflect s (EIf v0 (reify (anf (fst s, []) ρ e1))
-                        (reify (anf (fst s, []) ρ e2)))
+      reflect s (EIf v0 (reify (anf (clear_acc s) ρ e1))
+                        (reify (anf (clear_acc s) ρ e2)))
   | EApp e0 e1 =>
       let (s, v0) := anf s ρ e0 in
       let (s, v1) := anf s ρ e1 in
@@ -207,7 +221,7 @@ Fixpoint anf (s : state) (ρ : list exp) (e : exp) : state * exp :=
   end.
 
 Definition anf0 (e : exp) : exp :=
-  reify (anf (0, []) [] e).
+  reify (anf mk_state [] e).
 
 Definition reifyc (sv : state * val) : exp :=
   match sv with
@@ -224,7 +238,7 @@ Definition reflectc (s : state) (e : exp) : state * val :=
 
 Definition reifyv (sv : state * val) : val :=
   match sv with
-  | ((_, []), v) => v
+  | ((State _ []), v) => v
   | (s, VCode e0) => VCode (reify (s, e0))
   | (s, VErr err) => VErr err
   | _ => VErr ErrExpectedCode
@@ -248,7 +262,7 @@ Fixpoint eval (depth : nat) (s : state) (ρ : list val) (e : exp) : state * val 
           let (s, v0) := eval depth s ρ e0 in
           if v0 is VErr err then (s, VErr err) else
           eval depth s (v0 :: ρ) e1
-      | EVar n => (s, lookup_val ρ n)
+      | EVar i => (s, lookup_val ρ i)
       | EIf e0 e1 e2 =>
           let (s, v0) := eval depth s ρ e0 in
           match v0 with
@@ -256,8 +270,8 @@ Fixpoint eval (depth : nat) (s : state) (ρ : list val) (e : exp) : state * val 
           | VNat 0 => eval depth s ρ e2
           | VNat _ => eval depth s ρ e1
           | VCode v0 =>
-              match eval depth (fst s, []) ρ e1,
-                    eval depth (fst s, []) ρ e2 with
+              match eval depth (clear_acc s) ρ e1,
+                    eval depth (clear_acc s) ρ e2 with
               | (_, VErr err), _ | _, (_, VErr err) => (s, VErr err)
               | r1, r2 => reflectc s (EIf v0 (reifyc r1) (reifyc r2))
               end
@@ -321,12 +335,12 @@ Fixpoint eval (depth : nat) (s : state) (ρ : list val) (e : exp) : state * val 
           match v0 with
           | VErr err => (s0, VErr err)
           | VCode v0 =>
-              let (s1, v1) := eval depth (fst s0, []) ρ e1 in
+              let (s1, v1) := eval depth (clear_acc s0) ρ e1 in
               if v1 is VErr err then (s1, VErr err) else
               reflectc s0 (ERun v0 (reifyc (s1, v1)))
           | _ =>
-              (s0, reifyv (eval depth (fst s0, []) ρ
-                                (reifyc (eval depth (length ρ, snd s0) ρ e1))))
+              (s0, reifyv (eval depth (clear_acc s0) ρ
+                                (reifyc (eval depth (set_next_i s0 (length ρ)) ρ e1))))
           end
       | EErr err => (s, VErr err)
       end
@@ -348,10 +362,10 @@ with lift (depth : nat) (s : state) (v : val) : state * exp :=
       | VClo ρ e0 =>
           let (s0, v0) := fresh s in
           let (s1, v1) := fresh s0 in
-          let (s2, v2) := eval depth (fst s1, []) (VCode v1 :: VCode v0 :: ρ) e0 in
+          let (s2, v2) := eval depth (clear_acc s1) (VCode v1 :: VCode v0 :: ρ) e0 in
           match v2 with
           | VErr err => (s0, EErr err)
-          | VCode e2 => reflect (fst s, snd s1) (ELam (reify (s2, e2)))
+          | VCode e2 => reflect (State s.(next_i) s1.(acc)) (ELam (reify (s2, e2)))
           | _ => (s0, EErr ErrExpectedCode)
           end
       | VCode e0 => reflect s (ELift e0)
@@ -360,18 +374,18 @@ with lift (depth : nat) (s : state) (v : val) : state * exp :=
   end.
 
 Definition eval0 (e : exp) : state * val :=
-  eval 100 (0, []) [] e.
+  eval 100 mk_state [] e.
 
 Module Tests.
-Example ex0 : eval0 (ELam (EVar 1))                                  = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
-Example ex1 : eval0 (anf0 (ELam (EVar 1)))                           = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
-Example ex2 : eval0 (ELam (ELam (EVar 1)))                           = ((0, []), VClo [] (ELam (EVar 1))).                            reflexivity. Qed.
-Example ex3 : eval0 (anf0 (ELam (ELam (EVar 1))))                    = ((0, []), VClo [] (ELet (ELam (EVar 1)) (EVar 2))).            reflexivity. Qed.
+Example ex0 : eval0 (ELam (EVar 1))                                  = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
+Example ex1 : eval0 (anf0 (ELam (EVar 1)))                           = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
+Example ex2 : eval0 (ELam (ELam (EVar 1)))                           = (mk_state, VClo [] (ELam (EVar 1))).                           reflexivity. Qed.
+Example ex3 : eval0 (anf0 (ELam (ELam (EVar 1))))                    = (mk_state, VClo [] (ELet (ELam (EVar 1)) (EVar 2))).           reflexivity. Qed.
 Example ex4 : reifyc (eval0 (ELift (ELam (EVar 1))))                 = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
 Example ex5 : anf0 (ELam (EVar 1))                                   = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
 Example ex6 : reifyc (eval0 (ELift (ELam (ELift (ELam (EVar 1))))))  = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
 Example ex7 : anf0 (ELam (ELam (EVar 1)))                            = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
-Example ex8 : eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
+Example ex8 : eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
 Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELam (ELet (EApp (EVar 0) (EVar 1)) (EVar 2))) (EVar 0). reflexivity. Qed.
 
 (*
@@ -492,7 +506,7 @@ Example ex_tree_sum_eval :
   eval0 (EApp (EApp tree_sum (ELam (*_ f*) (EVar 1 (*f*))))
               (ECons (ECons (ENat 1) (ENat 2)) (ENat 3)))
   =
-  ((0, []), VNat 6).
+  (mk_state, VNat 6).
 Proof. Admitted.
 
 Example ex_tree_sum_lift :
