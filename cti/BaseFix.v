@@ -291,8 +291,6 @@ Example ex7 : anf0 (ELam (ELam (EVar 1)))                            = ELet (ELa
 Example ex8 : eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = ((0, []), VClo [] (EVar 1)).                                   reflexivity. Qed.
 Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELam (ELet (EApp (EVar 0) (EVar 1)) (EVar 2))) (EVar 0). reflexivity. Qed.
 
-(* Test from POPL 2018 Scala artifact:
-   https://github.com/TiarkRompf/collapsing-towers/blob/master/popl18/base.scala#L330-L364 *)
 (*
   Pattern:
     def f = fun { n => if (n != 0) f(n-1) else 1 }
@@ -301,30 +299,122 @@ Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELa
 *)
 
 (*
+  Test from POPL 2018 Scala artifact:
+  https://github.com/TiarkRompf/collapsing-towers/blob/master/popl18/base.scala#L330-L364
+
   ((lambda f _ (lift (lambda _ n
       (if n (mul n ((f 99) (sub n (lift (nat 1)))))
             (lift (nat 1))))))
    99)
+
+  99 is for nullary application and is discarded.
 *)
-(* 99 is for nullary apply and is discarded *)
-Definition f_self := EVar 0.
-Definition n := EVar 3.
 Definition fac :=
-  EApp (ELam (*f _*) (ELift (ELam (*_ n*)
-         (EIf n
-              (EMul n (EApp (EApp f_self (ENat 99)) (ESub n (ELift (ENat 1)))))
-              (ELift (ENat 1))))))
-       (ENat 99).
+  (EApp (ELam (*0 1*) (ELift (ELam (*2 3*)
+          (EIf (EVar 3)
+               (EMul (EVar 3) (EApp (EApp (EVar 0) (ENat 99))
+                                    (ESub (EVar 3) (ELift (ENat 1)))))
+               (ELift (ENat 1))))))
+        (ENat 99)).
 
-Definition fac_out :=
-  ELet (ELam (ELet (EIf (EVar 1)
-                        (ELet (ESub (EVar 1) (ENat 1))
-                        (ELet (EApp (EVar 0) (EVar 2))
-                        (ELet (EMul (EVar 1) (EVar 3))
-                        (EVar 4))))
-                        (ENat 1))
-               (EVar 2)))
-       (EVar 0).
+(*
+  ANF:                                       Simplified:
+  (let l (lambda f n                         (lambda f n
+           (let i (if n                        (if n (mul n (f (sub n 1))) 1))
+                       (let x (sub n 1)
+                         (let y (f x)
+                           (let z (mul n y)
+                             z)))
+                       1)
+             i))
+    l)
+*)
+Definition fac_eval :=
+  (ELet (*0*) (ELam (*0 1*)
+                (ELet (*2*) (EIf (EVar 1)
+                                 (ELet (*2*) (ESub (EVar 1) (ENat 1))
+                                   (ELet (*3*) (EApp (EVar 0) (EVar 2))
+                                     (ELet (*4*) (EMul (EVar 1) (EVar 3))
+                                       (EVar 4))))
+                                 (ENat 1))
+                  (EVar 2)))
+    (EVar 0)).
 
-Example factorial : reifyc (eval0 fac) = fac_out. Admitted.
+Example ex_fac : reifyc (eval0 fac) = fac_eval. Admitted.
+
+(*
+  ((lambda _ f
+      ((lambda _ d (d d))
+       (lambda _ t
+         (lambda _ maybe-lift
+           ;; The maybe-lift handling is baked into the fixed point so that the
+           ;; definition of `f` can remain clean:
+           (lambda _ x ((f (maybe-lift ((t t) maybe-lift))) x))))))
+    ;; No mention of maybe-lift anywhere. It's baked into tree-sum.
+    (lambda _ tree-sum
+      (lambda _ x
+        (if (pair? x)
+          (+ (tree-sum (car x))
+             (tree-sum (cdr x)))
+          x)))))
+*)
+Definition tree_sum :=
+  (EApp (ELam (*0 1*)
+          (EApp (ELam (*2 3*) (EApp (EVar 3) (EVar 3)))
+                (ELam (*2 3*)
+                  (ELam (*4 5*)
+                    (ELam (*6 7*)
+                      (EApp (EApp (EVar 1)
+                                  (EApp (EVar 5)
+                                        (EApp (EApp (EVar 3) (EVar 3))
+                                              (EVar 5))))
+                            (EVar 7)))))))
+        (ELam (*0 1*)
+          (ELam (*2 3*)
+            (EIf (EIsPair (EVar 3))
+              (EAdd (EApp (EVar 1) (ECar (EVar 3)))
+                    (EApp (EVar 1) (ECdr (EVar 3))))
+              (EVar 3))))).
+
+(*
+  ANF:                                          Simplified:
+  (let l (lambda self x                         (lambda self x
+           (let c (pair? x)                       (if (pair? x)
+             (let i (if c                           (+ (self (car x))
+                      (let a (car x)                   (self (cdr x)))
+                        (let l (self a)             x))
+                          (let d (cdr x)
+                            (let r (self d)
+                              (let sum (+ l r)
+                                sum)))))
+                      x)
+               i)))
+    l)
+*)
+Definition tree_sum_lifted :=
+  (ELet (*0*) (ELam (*0 1*)
+                (ELet (*2*) (EIsPair (EVar 1))
+                  (ELet (*3*) (EIf (EVar 2)
+                                   (ELet (*3*) (ECar (EVar 1))
+                                     (ELet (*4*) (EApp (EVar 0) (EVar 3))
+                                       (ELet (*5*) (ECdr (EVar 1))
+                                         (ELet (*6*) (EApp (EVar 0) (EVar 5))
+                                           (ELet (*7*) (EAdd (EVar 4) (EVar 6))
+                                             (EVar 7))))))
+                                   (EVar 1))
+                    (EVar 3))))
+    (EVar 0)).
+
+Example ex_tree_sum_eval :
+  eval0 (EApp (EApp tree_sum (ELam (*_ f*) (EVar 1 (*f*))))
+              (ECons (ECons (ENat 1) (ENat 2)) (ENat 3)))
+  =
+  ((0, []), VNat 6).
+Proof. Admitted.
+
+Example ex_tree_sum_lift :
+  reifyc (eval0 (ELift (EApp tree_sum (ELam (*_ f*) (ELift (EVar 1 (*f*)))))))
+  =
+  tree_sum_lifted.
+Proof. Admitted.
 End Tests.
