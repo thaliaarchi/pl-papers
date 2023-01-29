@@ -392,16 +392,16 @@ Definition eval0 (e : exp) : state * val :=
   eval 100 mk_state [] e.
 
 Module Tests.
-Example ex0 : eval0 (ELam (EVar 1))                                  = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
-Example ex1 : eval0 (anf0 (ELam (EVar 1)))                           = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
-Example ex2 : eval0 (ELam (ELam (EVar 1)))                           = (mk_state, VClo [] (ELam (EVar 1))).                           reflexivity. Qed.
-Example ex3 : eval0 (anf0 (ELam (ELam (EVar 1))))                    = (mk_state, VClo [] (ELet (ELam (EVar 1)) (EVar 2))).           reflexivity. Qed.
-Example ex4 : reifyc (eval0 (ELift (ELam (EVar 1))))                 = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
-Example ex5 : anf0 (ELam (EVar 1))                                   = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
-Example ex6 : reifyc (eval0 (ELift (ELam (ELift (ELam (EVar 1))))))  = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
-Example ex7 : anf0 (ELam (ELam (EVar 1)))                            = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
-Example ex8 : eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
-Example ex9 : reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELam (ELet (EApp (EVar 0) (EVar 1)) (EVar 2))) (EVar 0). reflexivity. Qed.
+Goal eval0 (ELam (EVar 1))                                  = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
+Goal eval0 (anf0 (ELam (EVar 1)))                           = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
+Goal eval0 (ELam (ELam (EVar 1)))                           = (mk_state, VClo [] (ELam (EVar 1))).                           reflexivity. Qed.
+Goal eval0 (anf0 (ELam (ELam (EVar 1))))                    = (mk_state, VClo [] (ELet (ELam (EVar 1)) (EVar 2))).           reflexivity. Qed.
+Goal reifyc (eval0 (ELift (ELam (EVar 1))))                 = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
+Goal anf0 (ELam (EVar 1))                                   = ELet (ELam (EVar 1)) (EVar 0).                                 reflexivity. Qed.
+Goal reifyc (eval0 (ELift (ELam (ELift (ELam (EVar 1))))))  = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
+Goal anf0 (ELam (ELam (EVar 1)))                            = ELet (ELam (ELet (ELam (EVar 1)) (EVar 2))) (EVar 0).          reflexivity. Qed.
+Goal eval0 (ERun (ELam (EVar 1)) (ELift (ELam (EVar 1))))   = (mk_state, VClo [] (EVar 1)).                                  reflexivity. Qed.
+Goal reifyc (eval0 (ELift (ELam (EApp (EVar 0) (EVar 1))))) = ELet (ELam (ELet (EApp (EVar 0) (EVar 1)) (EVar 2))) (EVar 0). reflexivity. Qed.
 
 (*
   Pattern:
@@ -452,7 +452,7 @@ Definition fac_eval :=
                   (EVar 2)))
     (EVar 0)).
 
-Example ex_fac : reifyc (eval0 fac) = fac_eval. Admitted.
+Goal reifyc (eval0 fac) = fac_eval. Admitted.
 
 (*
   ((lambda _ f
@@ -517,14 +517,14 @@ Definition tree_sum_lifted :=
                     (EVar 3))))
     (EVar 0)).
 
-Example ex_tree_sum_eval :
+Goal
   eval0 (EApp (EApp tree_sum (ELam (*_ f*) (EVar 1 (*f*))))
               (ECons (ECons (ENat 1) (ENat 2)) (ENat 3)))
   =
   (mk_state, VNat 6).
 Proof. Admitted.
 
-Example ex_tree_sum_lift :
+Goal
   reifyc (eval0 (ELift (EApp tree_sum (ELam (*_ f*) (ELift (EVar 1 (*f*)))))))
   =
   tree_sum_lifted.

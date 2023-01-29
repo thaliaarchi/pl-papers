@@ -58,7 +58,7 @@ Inductive multistep : state -> state -> Prop :=
 Definition inj (e : cexp) : state := (e, ENil, KMt).
 
 (* (((λx.x λy.y) 42), ⊥, mt) |->> (42, ⊥, mt) *)
-Example ex :
+Goal
   (inj (CApp (CApp (CLam "x" (CVar "x")) (CLam "y" (CVar "y"))) (CVal 42)))
   -->*
   (inj (CVal 42)).

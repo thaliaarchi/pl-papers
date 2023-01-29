@@ -43,7 +43,7 @@ Definition pink_eval :=
     (EErr ErrPinkEval))))))))))))))))))))).
 
 Module Tests.
-Example ex0 : (mk_state, VNat 5)                  = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ENat 5)) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
-Example ex1 : (mk_state, VPair (VNat 5) (VNat 6)) = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ECons "cons" (ECons (ENat 5) (ECons (ENat 6) ".")))) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
-Example ex2 : (mk_state, VNat 3)                  = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ECons "app" (ECons (ECons "lambda" (ECons "_" (ECons "x" (ECons (ECons "+" (ECons "x" (ECons (ENat 1) "."))) ".")))) (ECons (ENat 2) ".")))) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
+Goal (mk_state, VNat 5)                  = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ENat 5)) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
+Goal (mk_state, VPair (VNat 5) (VNat 6)) = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ECons "cons" (ECons (ENat 5) (ECons (ENat 6) ".")))) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
+Goal (mk_state, VNat 3)                  = eval0 (EApp (EApp (EApp pink_eval (ELam (EVar 1))) (ECons "app" (ECons (ECons "lambda" (ECons "_" (ECons "x" (ECons (ECons "+" (ECons "x" (ECons (ENat 1) "."))) ".")))) (ECons (ENat 2) ".")))) (ELam (EErr ErrUnboundVar))). reflexivity. Qed.
 End Tests.
