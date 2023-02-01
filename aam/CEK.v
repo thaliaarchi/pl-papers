@@ -26,34 +26,34 @@ Inductive cont :=
 
 Definition state : Type := cexp * env * cont.
 
-Reserved Notation "st '-->' st'" (at level 40).
+Reserved Notation "s --> s'" (at level 40).
 
 Inductive step : state -> state -> Prop :=
   (* Variable lookup *)
-  | SVar : forall x ρ v ρ' k,
+  | SVar x ρ v ρ' k :
       lookup ρ x = Some (v, ρ') ->
       (CVar x, ρ, k) --> (v, ρ', k)
   (* Function application *)
-  | SApp : forall e0 e1 ρ k,
+  | SApp e0 e1 ρ k :
       (CApp e0 e1, ρ, k) --> (e0, ρ, KAr e1 ρ k)
   (* Function value *)
-  | SFun : forall v ρ e ρ' k, (* v is CLam *)
+  | SFun v ρ e ρ' k : (* v is CLam *)
       (v, ρ, KAr e ρ' k) --> (e, ρ', KFn v ρ k)
   (* Argument value *)
-  | SArg : forall v ρ x e ρ' k, (* v is CLam *)
+  | SArg v ρ x e ρ' k : (* v is CLam *)
       (v, ρ, KFn (CLam x e) ρ' k) --> (e, ECons x v ρ ρ', k)
-  where "st '-->' st'" := (step st st').
+  where "s '-->' s'" := (step s s').
 
-Reserved Notation "st1 '-->*' st2" (at level 40).
+Reserved Notation "s1 -->* s2" (at level 40).
 
 Inductive multistep : state -> state -> Prop :=
-  | multistep_refl : forall (x : state),
+  | multistep_refl x :
       x -->* x
-  | multistep_step : forall (x y z : state),
+  | multistep_step x y z :
       x --> y ->
       y -->* z ->
       x -->* z
-  where "st1 '-->*' st2" := (multistep st1 st2).
+  where "s1 -->* s2" := (multistep s1 s2).
 
 Definition inj (e : cexp) : state := (e, ENil, KMt).
 

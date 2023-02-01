@@ -10,7 +10,7 @@ Arguments SuccessND {A} _.
 Arguments FailND {A}.
 Arguments OrND {A} _ _.
 
-Reserved Notation "m '>>=' f" (right associativity, at level 60).
+Reserved Notation "m >>= f" (right associativity, at level 60).
 
 Definition ret {A : Type} (a : A) : ND A :=
   SuccessND a.
@@ -44,7 +44,7 @@ Arguments Fail {I O A}.
 Arguments Or {I O A} _ _.
 Arguments Rec {I O A} _ _.
 
-Reserved Notation "m '>>=' f" (right associativity, at level 60).
+Reserved Notation "m >>= f" (right associativity, at level 60).
 
 Definition ret {I O A : Type} (a : A) : NDRec I O A :=
   Success a.

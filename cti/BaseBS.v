@@ -30,34 +30,35 @@ Inductive exp : Type :=
 Inductive val : Type :=
   | Cst (n : nat)
   | Tup (a b : val)
-  | Clo (env : list val) (e : exp)
+  | Clo (ρ : list val) (e : exp)
   | Code (e : exp).
 
 Definition env : Type := list val.
 
 (* Definition reflect (s : exp) := *)
 
-Reserved Notation "env '/' e '-->*' v" (at level 40).
+Reserved Notation "s -->* v" (at level 40).
 
 Inductive evalms : env * exp -> val -> Prop :=
-  | M_Lit : forall env n,               env / Lit n        -->* Cst n
-  | M_Var : forall env n v,             nth_error env n = Some v ->
-                                        env / Var n        -->* v
-  | M_Cons : forall env e1 e2 v1 v2,    env / e1           -->* v1 ->
-                                        env / e2           -->* v2 ->
-                                        env / Cons e1 e2   -->* Tup v1 v2
-  | M_Lam : forall env e,               env / Lam e        -->* Clo env e
-  | M_Let : forall env e1 e2 v1 v2,     env / e1           -->* v1 ->
-                                        (env ++ [v1]) / e2 -->* v2 ->
-                                        env / Let e1 e2    -->* v2
-  | M_App_Clo : forall env e1 e2 env3 e3 v2 v3,
-                                        env / e1           -->* Clo env3 e3 ->
-                                        env / e2           -->* v2 ->
-                                        (env3 ++ [Clo env3 e3; v2]) / e3 -->* v3 ->
-                                        env / App e1 e2    -->* v3
-  (* | M_App_Code : forall env e1 e2 s1 s2,
-                                        env / e1           -->* Code s1 ->
-                                        env / e2           -->* Code s2 ->
-                                        env / App e1 e2    -->* reflectc (App s1 s2) *)
+  | M_Lit ρ n :            (ρ, Lit n)                  -->* Cst n
+  | M_Var ρ n v :          nth_error ρ n = Some v ->
+                           (ρ, Var n)                  -->* v
+  | M_Cons ρ e1 e2 v1 v2 : (ρ, e1)                     -->* v1 ->
+                           (ρ, e2)                     -->* v2 ->
+                           (ρ, Cons e1 e2)             -->* Tup v1 v2
+  | M_Lam ρ e :            (ρ, Lam e)                  -->* Clo ρ e
+  | M_Let ρ e1 e2 v1 v2 :  (ρ, e1)                     -->* v1 ->
+                           (ρ ++ [v1], e2)             -->* v2 ->
+                           (ρ, Let e1 e2)              -->* v2
+  | M_App_Clo ρ e1 e2 ρ3 e3 v2 v3 :
+                           (ρ, e1)                     -->* Clo ρ3 e3 ->
+                           (ρ, e2)                     -->* v2 ->
+                           (ρ3 ++ [Clo ρ3 e3; v2], e3) -->* v3 ->
+                           (ρ, App e1 e2)              -->* v3
+  (* | M_App_Code ρ e1 e2 s1 s2 :
+                           (ρ, e1)                     -->* Code s1 ->
+                           (ρ, e2)                     -->* Code s2 ->
+                           (ρ, App e1 e2)              -->* reflectc (App s1 s2) *)
   (* ... *)
-  where "env '/' e '-->*' v" := (evalms (env, e) v).
+
+  where "s -->* v" := (evalms s v).
